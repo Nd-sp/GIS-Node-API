@@ -1,0 +1,1740 @@
+{
+  "clientName": "Thunder Client",
+  "collectionName": "OptiConnect GIS - All 122 APIs",
+  "collectionId": "opticonnect-gis-apis",
+  "dateExported": "2025-01-15",
+  "version": "1.0",
+  "folders": [
+    {
+      "name": "1. Authentication (5 APIs)",
+      "requests": [
+        {
+          "name": "Register User",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/auth/register",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"username\": \"testuser\",\n  \"email\": \"test@example.com\",\n  \"password\": \"Test123!\",\n  \"full_name\": \"Test User\",\n  \"role\": \"viewer\"\n}"
+          }
+        },
+        {
+          "name": "Login",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/auth/login",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"email\": \"test@example.com\",\n  \"password\": \"Test123!\"\n}"
+          }
+        },
+        {
+          "name": "Get Current User",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/auth/me",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Change Password",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/auth/change-password",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"currentPassword\": \"Test123!\",\n  \"newPassword\": \"NewPass123!\"\n}"
+          }
+        },
+        {
+          "name": "Logout",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/auth/logout",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. User Management (12 APIs)",
+      "requests": [
+        {
+          "name": "Get All Users (Paginated)",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/users?page=1&limit=10",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Get User by ID",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/users/1",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Create User (Admin Only)",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/users",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"username\": \"newuser\",\n  \"email\": \"newuser@example.com\",\n  \"password\": \"User123!\",\n  \"full_name\": \"New User\",\n  \"role\": \"engineer\",\n  \"phone\": \"+1234567890\",\n  \"department\": \"Engineering\"\n}"
+          }
+        },
+        {
+          "name": "Update User",
+          "method": "PUT",
+          "url": "{{baseUrl}}/api/users/1",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"full_name\": \"Updated User Name\",\n  \"phone\": \"+9876543210\",\n  \"department\": \"Operations\"\n}"
+          }
+        },
+        {
+          "name": "Delete User (Admin Only)",
+          "method": "DELETE",
+          "url": "{{baseUrl}}/api/users/2",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Activate User (Admin Only)",
+          "method": "PATCH",
+          "url": "{{baseUrl}}/api/users/2/activate",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Deactivate User (Admin Only)",
+          "method": "PATCH",
+          "url": "{{baseUrl}}/api/users/2/deactivate",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Get User's Regions",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/users/1/regions",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Assign Region to User (Admin Only)",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/users/1/regions",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"regionId\": 1,\n  \"accessLevel\": \"write\"\n}"
+          }
+        },
+        {
+          "name": "Unassign Region from User (Admin Only)",
+          "method": "DELETE",
+          "url": "{{baseUrl}}/api/users/1/regions/1",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Get All Users (Filter by Role)",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/users?role=engineer",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Get All Users (Filter by Status)",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/users?status=active",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. Region Management (8 APIs)",
+      "requests": [
+        {
+          "name": "Get All Regions",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/regions",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Get Region by ID",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/regions/1",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Create Region (Admin Only)",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/regions",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"name\": \"North Zone\",\n  \"code\": \"NZ001\",\n  \"type\": \"zone\",\n  \"latitude\": 28.7041,\n  \"longitude\": 77.1025,\n  \"description\": \"Northern operational zone\",\n  \"parent_id\": null\n}"
+          }
+        },
+        {
+          "name": "Update Region (Admin Only)",
+          "method": "PUT",
+          "url": "{{baseUrl}}/api/regions/1",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"name\": \"Updated North Zone\",\n  \"description\": \"Updated description\"\n}"
+          }
+        },
+        {
+          "name": "Delete Region (Admin Only)",
+          "method": "DELETE",
+          "url": "{{baseUrl}}/api/regions/2",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Get Child Regions",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/regions/1/children",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Get Region Users",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/regions/1/users",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Get Region Hierarchy Tree",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/regions/hierarchy",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. Group Management (9 APIs)",
+      "requests": [
+        {
+          "name": "Get All Groups",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/groups",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Get Group by ID",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/groups/1",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Create Group",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/groups",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"name\": \"Engineering Team Alpha\",\n  \"description\": \"Primary engineering team for network deployment\"\n}"
+          }
+        },
+        {
+          "name": "Update Group (Owner Only)",
+          "method": "PUT",
+          "url": "{{baseUrl}}/api/groups/1",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"name\": \"Updated Team Name\",\n  \"description\": \"Updated team description\"\n}"
+          }
+        },
+        {
+          "name": "Delete Group (Owner Only)",
+          "method": "DELETE",
+          "url": "{{baseUrl}}/api/groups/2",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Get Group Members",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/groups/1/members",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Add Member to Group",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/groups/1/members",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"userId\": 2,\n  \"role\": \"member\"\n}"
+          }
+        },
+        {
+          "name": "Remove Member from Group",
+          "method": "DELETE",
+          "url": "{{baseUrl}}/api/groups/1/members/2",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Update Member Role (Owner Only)",
+          "method": "PATCH",
+          "url": "{{baseUrl}}/api/groups/1/members/2",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"role\": \"admin\"\n}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. GIS Features (7 APIs)",
+      "requests": [
+        {
+          "name": "Get All GIS Features",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/features",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Get GIS Feature by ID",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/features/1",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Create GIS Feature",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/features",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"feature_name\": \"Main Tower Site\",\n  \"feature_type\": \"point\",\n  \"geometry\": {\n    \"type\": \"Point\",\n    \"coordinates\": [77.2090, 28.6139]\n  },\n  \"properties\": {\n    \"height\": 50,\n    \"status\": \"active\"\n  },\n  \"region_id\": 1,\n  \"description\": \"Primary tower location\"\n}"
+          }
+        },
+        {
+          "name": "Update GIS Feature",
+          "method": "PUT",
+          "url": "{{baseUrl}}/api/features/1",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"feature_name\": \"Updated Tower Site\",\n  \"properties\": {\n    \"height\": 60,\n    \"status\": \"maintenance\"\n  }\n}"
+          }
+        },
+        {
+          "name": "Delete GIS Feature",
+          "method": "DELETE",
+          "url": "{{baseUrl}}/api/features/1",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Find Nearby Features",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/features/nearby?lat=28.6139&lng=77.2090&radius=5000",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Get Features by Region",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/features/region/1",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "6. Distance Measurement (5 APIs)",
+      "requests": [
+        {
+          "name": "Get All Distance Measurements",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/measurements/distance",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Get Distance Measurement by ID",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/measurements/distance/1",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Create Distance Measurement",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/measurements/distance",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"measurement_name\": \"Tower to Tower Distance\",\n  \"points\": [\n    {\"lat\": 28.6139, \"lng\": 77.2090},\n    {\"lat\": 28.6200, \"lng\": 77.2150},\n    {\"lat\": 28.6250, \"lng\": 77.2200}\n  ],\n  \"total_distance\": 1523.45,\n  \"unit\": \"meters\",\n  \"region_id\": 1,\n  \"notes\": \"Fiber route measurement\",\n  \"is_saved\": true\n}"
+          }
+        },
+        {
+          "name": "Update Distance Measurement",
+          "method": "PUT",
+          "url": "{{baseUrl}}/api/measurements/distance/1",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"measurement_name\": \"Updated Route Name\",\n  \"notes\": \"Updated measurement notes\"\n}"
+          }
+        },
+        {
+          "name": "Delete Distance Measurement",
+          "method": "DELETE",
+          "url": "{{baseUrl}}/api/measurements/distance/1",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "7. Polygon Drawing (5 APIs)",
+      "requests": [
+        {
+          "name": "Get All Polygons",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/drawings/polygon",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Get Polygon by ID",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/drawings/polygon/1",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Create Polygon",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/drawings/polygon",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"polygon_name\": \"Coverage Area Zone A\",\n  \"coordinates\": [\n    {\"lat\": 28.6139, \"lng\": 77.2090},\n    {\"lat\": 28.6200, \"lng\": 77.2090},\n    {\"lat\": 28.6200, \"lng\": 77.2150},\n    {\"lat\": 28.6139, \"lng\": 77.2150},\n    {\"lat\": 28.6139, \"lng\": 77.2090}\n  ],\n  \"area\": 5000000,\n  \"perimeter\": 10000,\n  \"fill_color\": \"#3388ff\",\n  \"stroke_color\": \"#0066cc\",\n  \"opacity\": 0.5,\n  \"properties\": {\"zone\": \"A\", \"priority\": \"high\"},\n  \"region_id\": 1,\n  \"notes\": \"Primary coverage area\",\n  \"is_saved\": true\n}"
+          }
+        },
+        {
+          "name": "Update Polygon",
+          "method": "PUT",
+          "url": "{{baseUrl}}/api/drawings/polygon/1",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"polygon_name\": \"Updated Coverage Area\",\n  \"fill_color\": \"#ff0000\",\n  \"opacity\": 0.7\n}"
+          }
+        },
+        {
+          "name": "Delete Polygon",
+          "method": "DELETE",
+          "url": "{{baseUrl}}/api/drawings/polygon/1",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "8. Circle Drawing (5 APIs)",
+      "requests": [
+        {
+          "name": "Get All Circles",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/drawings/circle",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Get Circle by ID",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/drawings/circle/1",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Create Circle",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/drawings/circle",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"circle_name\": \"Tower Signal Range\",\n  \"center_lat\": 28.6139,\n  \"center_lng\": 77.2090,\n  \"radius\": 2000,\n  \"fill_color\": \"#ff6b6b\",\n  \"stroke_color\": \"#cc0000\",\n  \"opacity\": 0.4,\n  \"properties\": {\"signal_type\": \"4G\", \"power\": \"high\"},\n  \"region_id\": 1,\n  \"notes\": \"Estimated coverage radius\",\n  \"is_saved\": true\n}"
+          }
+        },
+        {
+          "name": "Update Circle",
+          "method": "PUT",
+          "url": "{{baseUrl}}/api/drawings/circle/1",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"circle_name\": \"Updated Signal Range\",\n  \"radius\": 2500,\n  \"fill_color\": \"#00ff00\"\n}"
+          }
+        },
+        {
+          "name": "Delete Circle",
+          "method": "DELETE",
+          "url": "{{baseUrl}}/api/drawings/circle/1",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "9. Sector RF (6 APIs)",
+      "requests": [
+        {
+          "name": "Get All RF Sectors",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/rf/sectors",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Get RF Sector by ID",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/rf/sectors/1",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Create RF Sector",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/rf/sectors",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"sector_name\": \"Tower Alpha - Sector 1\",\n  \"tower_lat\": 28.6139,\n  \"tower_lng\": 77.2090,\n  \"azimuth\": 45,\n  \"beamwidth\": 65,\n  \"radius\": 2500,\n  \"frequency\": 2400,\n  \"power\": 43.5,\n  \"antenna_height\": 35,\n  \"tilt\": 3,\n  \"technology\": \"4G LTE\",\n  \"properties\": {\"band\": \"L2300\"},\n  \"region_id\": 1,\n  \"notes\": \"Primary sector covering north\",\n  \"is_saved\": true\n}"
+          }
+        },
+        {
+          "name": "Update RF Sector",
+          "method": "PUT",
+          "url": "{{baseUrl}}/api/rf/sectors/1",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"sector_name\": \"Updated Sector Name\",\n  \"azimuth\": 50,\n  \"power\": 45.0\n}"
+          }
+        },
+        {
+          "name": "Delete RF Sector",
+          "method": "DELETE",
+          "url": "{{baseUrl}}/api/rf/sectors/1",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Calculate RF Coverage",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/rf/sectors/1/calculate",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "10. Elevation Profile (5 APIs)",
+      "requests": [
+        {
+          "name": "Get All Elevation Profiles",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/elevation/profiles",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Get Elevation Profile by ID",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/elevation/profiles/1",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Create Elevation Profile",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/elevation/profiles",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"profile_name\": \"Route Elevation Profile\",\n  \"path_points\": [\n    {\"lat\": 28.6139, \"lng\": 77.2090},\n    {\"lat\": 28.6200, \"lng\": 77.2150}\n  ],\n  \"elevation_data\": [\n    {\"distance\": 0, \"elevation\": 250},\n    {\"distance\": 500, \"elevation\": 280},\n    {\"distance\": 1000, \"elevation\": 300}\n  ],\n  \"total_distance\": 1000,\n  \"min_elevation\": 250,\n  \"max_elevation\": 300,\n  \"region_id\": 1,\n  \"notes\": \"Fiber route elevation check\",\n  \"is_saved\": true\n}"
+          }
+        },
+        {
+          "name": "Delete Elevation Profile",
+          "method": "DELETE",
+          "url": "{{baseUrl}}/api/elevation/profiles/1",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Calculate Elevation (Google API)",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/elevation/calculate",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"path\": [\n    {\"lat\": 28.6139, \"lng\": 77.2090},\n    {\"lat\": 28.6200, \"lng\": 77.2150}\n  ],\n  \"samples\": 10\n}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "11. Infrastructure (7 APIs)",
+      "requests": [
+        {
+          "name": "Get All Infrastructure Items",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/infrastructure",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Get Infrastructure Item by ID",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/infrastructure/1",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Create Infrastructure Item",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/infrastructure",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"item_type\": \"tower\",\n  \"item_name\": \"Cell Tower Alpha-01\",\n  \"latitude\": 28.6139,\n  \"longitude\": 77.2090,\n  \"height\": 50,\n  \"status\": \"active\",\n  \"installation_date\": \"2024-01-15\",\n  \"properties\": {\n    \"owner\": \"Company A\",\n    \"capacity\": \"3 sectors\"\n  },\n  \"region_id\": 1,\n  \"notes\": \"Primary tower in zone A\"\n}"
+          }
+        },
+        {
+          "name": "Update Infrastructure Item",
+          "method": "PUT",
+          "url": "{{baseUrl}}/api/infrastructure/1",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"item_name\": \"Updated Tower Name\",\n  \"status\": \"maintenance\",\n  \"notes\": \"Under routine maintenance\"\n}"
+          }
+        },
+        {
+          "name": "Delete Infrastructure Item",
+          "method": "DELETE",
+          "url": "{{baseUrl}}/api/infrastructure/1",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Update Infrastructure Status",
+          "method": "PATCH",
+          "url": "{{baseUrl}}/api/infrastructure/1/status",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"status\": \"inactive\"\n}"
+          }
+        },
+        {
+          "name": "Upload Infrastructure Photo",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/infrastructure/1/upload-photo",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "formdata",
+            "formdata": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "12. Layer Management (7 APIs)",
+      "requests": [
+        {
+          "name": "Get All Layers",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/layers",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Get Layer by ID",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/layers/1",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Save Layer Configuration",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/layers",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"layer_name\": \"Tower Coverage Layers\",\n  \"layer_type\": \"overlay\",\n  \"data_source\": \"user_drawings\",\n  \"style_config\": {\n    \"color\": \"#3388ff\",\n    \"opacity\": 0.6\n  },\n  \"is_visible\": true,\n  \"display_order\": 1,\n  \"region_id\": 1\n}"
+          }
+        },
+        {
+          "name": "Update Layer",
+          "method": "PUT",
+          "url": "{{baseUrl}}/api/layers/1",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"layer_name\": \"Updated Layer Name\",\n  \"style_config\": {\n    \"color\": \"#ff0000\",\n    \"opacity\": 0.8\n  }\n}"
+          }
+        },
+        {
+          "name": "Delete Layer",
+          "method": "DELETE",
+          "url": "{{baseUrl}}/api/layers/1",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Toggle Layer Visibility",
+          "method": "PATCH",
+          "url": "{{baseUrl}}/api/layers/1/visibility",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"is_visible\": false\n}"
+          }
+        },
+        {
+          "name": "Share Layer with Users",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/layers/1/share",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"userIds\": [2, 3, 4]\n}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "13. Bookmarks (4 APIs)",
+      "requests": [
+        {
+          "name": "Get All Bookmarks",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/bookmarks",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Create Bookmark",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/bookmarks",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"name\": \"Important Tower Location\",\n  \"latitude\": 28.6139,\n  \"longitude\": 77.2090,\n  \"zoom_level\": 15,\n  \"map_type\": \"satellite\",\n  \"description\": \"Critical infrastructure site\"\n}"
+          }
+        },
+        {
+          "name": "Update Bookmark",
+          "method": "PUT",
+          "url": "{{baseUrl}}/api/bookmarks/1",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"name\": \"Updated Bookmark Name\",\n  \"description\": \"Updated description\"\n}"
+          }
+        },
+        {
+          "name": "Delete Bookmark",
+          "method": "DELETE",
+          "url": "{{baseUrl}}/api/bookmarks/1",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "14. Search (6 APIs)",
+      "requests": [
+        {
+          "name": "Global Search",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/search/global?q=tower",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Search Users",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/search/users?q=john",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Search Regions",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/search/regions?q=north",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Search GIS Features",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/search/features?q=tower&type=point",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Get Search History",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/search/history",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Delete Search History Entry",
+          "method": "DELETE",
+          "url": "{{baseUrl}}/api/search/history/1",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "15. Analytics (5 APIs)",
+      "requests": [
+        {
+          "name": "Get Dashboard Analytics",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/analytics/dashboard",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Get User Analytics (Manager+)",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/analytics/users",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Get Region Analytics",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/analytics/regions?regionId=1",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Get Feature Analytics",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/analytics/features",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Track Custom Event",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/analytics/track",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"event_type\": \"map_interaction\",\n  \"event_data\": {\n    \"action\": \"zoom\",\n    \"level\": 15\n  }\n}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "16. Audit Logs (3 APIs)",
+      "requests": [
+        {
+          "name": "Get All Audit Logs (Admin Only)",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/audit/logs?page=1&limit=50",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Get Audit Log by ID",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/audit/logs/1",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Get User Activity Logs",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/audit/user/1?startDate=2024-01-01&endDate=2024-12-31",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "17. User Preferences (3 APIs)",
+      "requests": [
+        {
+          "name": "Get User Preferences",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/preferences",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Update User Preferences",
+          "method": "PUT",
+          "url": "{{baseUrl}}/api/preferences",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"default_map_type\": \"satellite\",\n  \"default_zoom\": 12,\n  \"default_center_lat\": 28.6139,\n  \"default_center_lng\": 77.2090,\n  \"theme\": \"dark\",\n  \"measurement_unit\": \"metric\",\n  \"auto_save\": true,\n  \"notifications_enabled\": true\n}"
+          }
+        },
+        {
+          "name": "Reset User Preferences to Default",
+          "method": "DELETE",
+          "url": "{{baseUrl}}/api/preferences",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "18. Data Hub (5 APIs)",
+      "requests": [
+        {
+          "name": "Import Data",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/datahub/import",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"data_type\": \"infrastructure\",\n  \"source_format\": \"geojson\",\n  \"data\": {\n    \"type\": \"FeatureCollection\",\n    \"features\": []\n  },\n  \"region_id\": 1\n}"
+          }
+        },
+        {
+          "name": "Get Import History",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/datahub/imports",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Export Data",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/datahub/export",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"data_type\": \"all\",\n  \"export_format\": \"geojson\",\n  \"include_metadata\": true,\n  \"region_id\": 1\n}"
+          }
+        },
+        {
+          "name": "Get Export History",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/datahub/exports",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Download Export File",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/datahub/exports/1/download",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "19. Temporary Access (3 APIs)",
+      "requests": [
+        {
+          "name": "Get All Temporary Access Grants",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/temporary-access",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Grant Temporary Access (Admin/Manager)",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/temporary-access",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"userId\": 2,\n  \"regionId\": 1,\n  \"accessLevel\": \"read\",\n  \"expiresAt\": \"2025-02-01T23:59:59Z\",\n  \"reason\": \"Temporary project access for Q1 2025\"\n}"
+          }
+        },
+        {
+          "name": "Revoke Temporary Access",
+          "method": "DELETE",
+          "url": "{{baseUrl}}/api/temporary-access/1",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "20. Region Requests (4 APIs)",
+      "requests": [
+        {
+          "name": "Get All Region Access Requests",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/region-requests",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Create Region Access Request",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/region-requests",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"regionId\": 1,\n  \"accessLevel\": \"write\",\n  \"justification\": \"Need write access to update tower data for Q1 deployment project\"\n}"
+          }
+        },
+        {
+          "name": "Approve Region Access Request (Admin/Manager)",
+          "method": "PATCH",
+          "url": "{{baseUrl}}/api/region-requests/1/approve",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Reject Region Access Request (Admin/Manager)",
+          "method": "PATCH",
+          "url": "{{baseUrl}}/api/region-requests/1/reject",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"reason\": \"Insufficient justification provided\"\n}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "21. Permissions (3 APIs)",
+      "requests": [
+        {
+          "name": "Get All Permissions (Admin Only)",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/permissions",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Get Permission by ID (Admin Only)",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/permissions/1",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ]
+        },
+        {
+          "name": "Create Permission (Admin Only)",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/permissions",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{token}}"
+            }
+          ],
+          "body": {
+            "type": "json",
+            "raw": "{\n  \"userId\": 2,\n  \"regionId\": 1,\n  \"accessLevel\": \"write\",\n  \"grantedBy\": 1\n}"
+          }
+        }
+      ]
+    }
+  ],
+  "environments": [
+    {
+      "name": "Local Development",
+      "variables": [
+        {
+          "name": "baseUrl",
+          "value": "http://localhost:5000"
+        },
+        {
+          "name": "token",
+          "value": "YOUR_JWT_TOKEN_HERE"
+        }
+      ]
+    }
+  ]
+}

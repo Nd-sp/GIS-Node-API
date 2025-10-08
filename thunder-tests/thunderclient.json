@@ -1,0 +1,429 @@
+{
+  "clientName": "Thunder Client",
+  "collectionName": "OptiConnect API Tests",
+  "collectionId": "opticonnect-api-tests",
+  "dateExported": "2025-01-08",
+  "version": "1.2",
+  "folders": [
+    {
+      "id": "auth-folder",
+      "name": "1. Authentication",
+      "containerId": "",
+      "created": "2025-01-08",
+      "sortNum": 10000
+    },
+    {
+      "id": "users-folder",
+      "name": "2. User Management",
+      "containerId": "",
+      "created": "2025-01-08",
+      "sortNum": 20000
+    },
+    {
+      "id": "groups-folder",
+      "name": "3. Groups (FIXED)",
+      "containerId": "",
+      "created": "2025-01-08",
+      "sortNum": 30000
+    },
+    {
+      "id": "features-folder",
+      "name": "4. GIS Features (FIXED)",
+      "containerId": "",
+      "created": "2025-01-08",
+      "sortNum": 40000
+    },
+    {
+      "id": "measurements-folder",
+      "name": "5. Distance Measurements",
+      "containerId": "",
+      "created": "2025-01-08",
+      "sortNum": 50000
+    },
+    {
+      "id": "polygons-folder",
+      "name": "6. Polygon Drawings",
+      "containerId": "",
+      "created": "2025-01-08",
+      "sortNum": 60000
+    },
+    {
+      "id": "circles-folder",
+      "name": "7. Circle Drawings",
+      "containerId": "",
+      "created": "2025-01-08",
+      "sortNum": 70000
+    },
+    {
+      "id": "sectors-folder",
+      "name": "8. Sector RF",
+      "containerId": "",
+      "created": "2025-01-08",
+      "sortNum": 80000
+    }
+  ],
+  "requests": [
+    {
+      "id": "register-user",
+      "name": "Register User",
+      "url": "{{baseUrl}}/api/auth/register",
+      "method": "POST",
+      "sortNum": 10000,
+      "created": "2025-01-08",
+      "modified": "2025-01-08",
+      "headers": [],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"username\": \"testuser\",\n  \"email\": \"test@example.com\",\n  \"password\": \"Test@123\",\n  \"full_name\": \"Test User\",\n  \"role\": \"viewer\"\n}",
+        "form": []
+      },
+      "tests": [
+        {
+          "type": "set-env-var",
+          "custom": "json.token",
+          "action": "setto",
+          "value": "{{token}}"
+        }
+      ],
+      "containerId": "auth-folder"
+    },
+    {
+      "id": "login-user",
+      "name": "Login User",
+      "url": "{{baseUrl}}/api/auth/login",
+      "method": "POST",
+      "sortNum": 10100,
+      "created": "2025-01-08",
+      "modified": "2025-01-08",
+      "headers": [],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"email\": \"test@example.com\",\n  \"password\": \"Test@123\"\n}",
+        "form": []
+      },
+      "tests": [
+        {
+          "type": "set-env-var",
+          "custom": "json.token",
+          "action": "setto",
+          "value": "{{token}}"
+        }
+      ],
+      "containerId": "auth-folder"
+    },
+    {
+      "id": "get-current-user",
+      "name": "Get Current User",
+      "url": "{{baseUrl}}/api/auth/me",
+      "method": "GET",
+      "sortNum": 10200,
+      "created": "2025-01-08",
+      "modified": "2025-01-08",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{token}}"
+        }
+      ],
+      "params": [],
+      "containerId": "auth-folder"
+    },
+    {
+      "id": "create-group",
+      "name": "✅ Create Group (Test owner_id & is_public)",
+      "url": "{{baseUrl}}/api/groups",
+      "method": "POST",
+      "sortNum": 30000,
+      "created": "2025-01-08",
+      "modified": "2025-01-08",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{token}}"
+        }
+      ],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"name\": \"Engineering Team\",\n  \"description\": \"Main engineering group\",\n  \"is_public\": false\n}",
+        "form": []
+      },
+      "tests": [
+        {
+          "type": "set-env-var",
+          "custom": "json.group.id",
+          "action": "setto",
+          "value": "{{groupId}}"
+        }
+      ],
+      "containerId": "groups-folder"
+    },
+    {
+      "id": "get-all-groups",
+      "name": "Get All Groups",
+      "url": "{{baseUrl}}/api/groups",
+      "method": "GET",
+      "sortNum": 30100,
+      "created": "2025-01-08",
+      "modified": "2025-01-08",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{token}}"
+        }
+      ],
+      "params": [],
+      "containerId": "groups-folder"
+    },
+    {
+      "id": "add-group-member",
+      "name": "✅ Add Group Member (Test group_members table)",
+      "url": "{{baseUrl}}/api/groups/{{groupId}}/members",
+      "method": "POST",
+      "sortNum": 30200,
+      "created": "2025-01-08",
+      "modified": "2025-01-08",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{token}}"
+        }
+      ],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"user_id\": 1,\n  \"role\": \"member\"\n}",
+        "form": []
+      },
+      "containerId": "groups-folder"
+    },
+    {
+      "id": "create-feature",
+      "name": "✅ Create GIS Feature (Test geometry & tags)",
+      "url": "{{baseUrl}}/api/features",
+      "method": "POST",
+      "sortNum": 40000,
+      "created": "2025-01-08",
+      "modified": "2025-01-08",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{token}}"
+        }
+      ],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"name\": \"Cell Tower A1\",\n  \"feature_type\": \"tower\",\n  \"geometry\": {\n    \"type\": \"Point\",\n    \"coordinates\": [77.2090, 28.6139]\n  },\n  \"latitude\": 28.6139,\n  \"longitude\": 77.2090,\n  \"tags\": [\"telecom\", \"5G\", \"priority\"]\n}",
+        "form": []
+      },
+      "tests": [
+        {
+          "type": "set-env-var",
+          "custom": "json.feature.id",
+          "action": "setto",
+          "value": "{{featureId}}"
+        }
+      ],
+      "containerId": "features-folder"
+    },
+    {
+      "id": "get-all-features",
+      "name": "Get All Features",
+      "url": "{{baseUrl}}/api/features",
+      "method": "GET",
+      "sortNum": 40100,
+      "created": "2025-01-08",
+      "modified": "2025-01-08",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{token}}"
+        }
+      ],
+      "params": [],
+      "containerId": "features-folder"
+    },
+    {
+      "id": "create-distance",
+      "name": "Create Distance Measurement",
+      "url": "{{baseUrl}}/api/measurements/distance",
+      "method": "POST",
+      "sortNum": 50000,
+      "created": "2025-01-08",
+      "modified": "2025-01-08",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{token}}"
+        }
+      ],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"measurement_name\": \"Tower to Building\",\n  \"points\": [\n    {\"lat\": 28.6139, \"lng\": 77.2090},\n    {\"lat\": 28.6200, \"lng\": 77.2150}\n  ],\n  \"total_distance\": 850.5,\n  \"unit\": \"meters\",\n  \"is_saved\": true\n}",
+        "form": []
+      },
+      "containerId": "measurements-folder"
+    },
+    {
+      "id": "get-all-measurements",
+      "name": "Get All Measurements",
+      "url": "{{baseUrl}}/api/measurements/distance",
+      "method": "GET",
+      "sortNum": 50100,
+      "created": "2025-01-08",
+      "modified": "2025-01-08",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{token}}"
+        }
+      ],
+      "params": [],
+      "containerId": "measurements-folder"
+    },
+    {
+      "id": "create-polygon",
+      "name": "Create Polygon Drawing",
+      "url": "{{baseUrl}}/api/drawings/polygon",
+      "method": "POST",
+      "sortNum": 60000,
+      "created": "2025-01-08",
+      "modified": "2025-01-08",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{token}}"
+        }
+      ],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"polygon_name\": \"Coverage Area A\",\n  \"coordinates\": [\n    {\"lat\": 28.6139, \"lng\": 77.2090},\n    {\"lat\": 28.6200, \"lng\": 77.2090},\n    {\"lat\": 28.6200, \"lng\": 77.2150},\n    {\"lat\": 28.6139, \"lng\": 77.2150},\n    {\"lat\": 28.6139, \"lng\": 77.2090}\n  ],\n  \"area\": 5000000,\n  \"perimeter\": 10000,\n  \"fill_color\": \"#3388ff\",\n  \"opacity\": 0.5,\n  \"is_saved\": true\n}",
+        "form": []
+      },
+      "containerId": "polygons-folder"
+    },
+    {
+      "id": "get-all-polygons",
+      "name": "Get All Polygons",
+      "url": "{{baseUrl}}/api/drawings/polygon",
+      "method": "GET",
+      "sortNum": 60100,
+      "created": "2025-01-08",
+      "modified": "2025-01-08",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{token}}"
+        }
+      ],
+      "params": [],
+      "containerId": "polygons-folder"
+    },
+    {
+      "id": "create-circle",
+      "name": "Create Circle Drawing",
+      "url": "{{baseUrl}}/api/drawings/circle",
+      "method": "POST",
+      "sortNum": 70000,
+      "created": "2025-01-08",
+      "modified": "2025-01-08",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{token}}"
+        }
+      ],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"circle_name\": \"Signal Range A\",\n  \"center_lat\": 28.6139,\n  \"center_lng\": 77.2090,\n  \"radius\": 1000,\n  \"fill_color\": \"#3388ff\",\n  \"opacity\": 0.3,\n  \"is_saved\": true\n}",
+        "form": []
+      },
+      "containerId": "circles-folder"
+    },
+    {
+      "id": "get-all-circles",
+      "name": "Get All Circles",
+      "url": "{{baseUrl}}/api/drawings/circle",
+      "method": "GET",
+      "sortNum": 70100,
+      "created": "2025-01-08",
+      "modified": "2025-01-08",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{token}}"
+        }
+      ],
+      "params": [],
+      "containerId": "circles-folder"
+    },
+    {
+      "id": "create-sector",
+      "name": "Create Sector RF",
+      "url": "{{baseUrl}}/api/rf/sectors",
+      "method": "POST",
+      "sortNum": 80000,
+      "created": "2025-01-08",
+      "modified": "2025-01-08",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{token}}"
+        }
+      ],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"sector_name\": \"Tower A - Sector 1\",\n  \"tower_lat\": 28.6139,\n  \"tower_lng\": 77.2090,\n  \"azimuth\": 45,\n  \"beamwidth\": 65,\n  \"radius\": 1500,\n  \"frequency\": 2400,\n  \"power\": 43.5,\n  \"is_saved\": true\n}",
+        "form": []
+      },
+      "containerId": "sectors-folder"
+    },
+    {
+      "id": "get-all-sectors",
+      "name": "Get All Sectors",
+      "url": "{{baseUrl}}/api/rf/sectors",
+      "method": "GET",
+      "sortNum": 80100,
+      "created": "2025-01-08",
+      "modified": "2025-01-08",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{token}}"
+        }
+      ],
+      "params": [],
+      "containerId": "sectors-folder"
+    }
+  ],
+  "environments": [
+    {
+      "name": "Development",
+      "data": [
+        {
+          "name": "baseUrl",
+          "value": "http://localhost:5000"
+        },
+        {
+          "name": "token",
+          "value": ""
+        },
+        {
+          "name": "groupId",
+          "value": "1"
+        },
+        {
+          "name": "featureId",
+          "value": "1"
+        }
+      ]
+    }
+  ]
+}
