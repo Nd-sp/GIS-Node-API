@@ -50,9 +50,41 @@ const decodeToken = (token) => {
   return jwt.decode(token);
 };
 
+/**
+ * Generate email verification token
+ * @param {Object} payload - Data to encode (user id, email)
+ * @returns {String} Email verification token
+ */
+const generateEmailVerificationToken = (payload) => {
+  return jwt.sign(payload, process.env.JWT_SECRET, {
+    expiresIn: '24h' // Token valid for 24 hours
+  });
+};
+
+/**
+ * Verify email verification token
+ * @param {String} token - Email verification token
+ * @returns {Object} Decoded payload
+ */
+const verifyEmailToken = (token) => {
+  try {
+    return jwt.verify(token, process.env.JWT_SECRET);
+  } catch (error) {
+    if (error.name === 'TokenExpiredError') {
+      throw new Error('Verification link has expired. Please request a new one.');
+    } else if (error.name === 'JsonWebTokenError') {
+      throw new Error('Invalid verification link');
+    } else {
+      throw new Error('Email verification failed');
+    }
+  }
+};
+
 module.exports = {
   generateToken,
   generateRefreshToken,
   verifyToken,
-  decodeToken
+  decodeToken,
+  generateEmailVerificationToken,
+  verifyEmailToken
 };

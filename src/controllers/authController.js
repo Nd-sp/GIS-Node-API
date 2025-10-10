@@ -1,6 +1,7 @@
 const { pool } = require('../config/database');
 const { hashPassword, comparePassword } = require('../utils/bcrypt');
-const { generateToken, generateRefreshToken } = require('../utils/jwt');
+const { generateToken, generateRefreshToken, verifyEmailToken } = require('../utils/jwt');
+const { sendVerificationEmail } = require('../services/emailService');
 
 /**
  * @route   POST /api/auth/login
@@ -58,13 +59,12 @@ const login = async (req, res) => {
       [user.id]
     );
 
-    // Get user's primary region
+    // Get user's ALL regions
     const [regions] = await pool.query(
       `SELECT r.id, r.name, r.code, r.type, ur.access_level
        FROM regions r
        INNER JOIN user_regions ur ON r.id = ur.region_id
-       WHERE ur.user_id = ? AND r.is_active = true
-       LIMIT 1`,
+       WHERE ur.user_id = ? AND r.is_active = true`,
       [user.id]
     );
 
@@ -79,6 +79,9 @@ const login = async (req, res) => {
       id: user.id
     });
 
+    // Map regions to just names for frontend
+    const assignedRegions = regions.map(r => r.name);
+
     // Return user data and token
     res.json({
       success: true,
@@ -92,7 +95,13 @@ const login = async (req, res) => {
         role: user.role,
         phone: user.phone,
         department: user.department,
-        region: regions[0] || null,
+        office_location: user.office_location,
+        gender: user.gender,
+        street: user.street,
+        city: user.city,
+        state: user.state,
+        pincode: user.pincode,
+        assignedRegions: assignedRegions,  // Array of region names
         last_login: user.last_login
       }
     });
@@ -148,7 +157,20 @@ const register = async (req, res) => {
 
     const userId = result.insertId;
 
-    // Generate token
+    // Send verification email
+    try {
+      await sendVerificationEmail({
+        id: userId,
+        email,
+        username
+      });
+      console.log(`✅ Verification email sent to ${email}`);
+    } catch (emailError) {
+      console.error('Failed to send verification email:', emailError);
+      // Continue with registration even if email fails
+    }
+
+    // Generate token (user can still login, but should verify email)
     const token = generateToken({
       id: userId,
       email,
@@ -158,12 +180,14 @@ const register = async (req, res) => {
     res.status(201).json({
       success: true,
       token,
+      message: 'Registration successful! Please check your email to verify your account.',
       user: {
         id: userId,
         username,
         email,
         full_name,
-        role
+        role,
+        is_email_verified: false
       }
     });
 
@@ -300,10 +324,152 @@ const logout = async (req, res) => {
   });
 };
 
+/**
+ * @route   GET /api/auth/verify-email/:token
+ * @desc    Verify user's email address
+ * @access  Public
+ */
+const verifyEmail = async (req, res) => {
+  try {
+    const { token } = req.params;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        error: 'Verification token is required'
+      });
+    }
+
+    // Verify the token
+    let decoded;
+    try {
+      decoded = verifyEmailToken(token);
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        error: error.message || 'Invalid or expired verification link'
+      });
+    }
+
+    // Check if user exists
+    const [users] = await pool.query(
+      'SELECT id, email, is_email_verified FROM users WHERE id = ?',
+      [decoded.id]
+    );
+
+    if (users.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    const user = users[0];
+
+    // Check if email is already verified
+    if (user.is_email_verified) {
+      return res.json({
+        success: true,
+        message: 'Email is already verified',
+        alreadyVerified: true
+      });
+    }
+
+    // Update user's email verification status
+    await pool.query(
+      'UPDATE users SET is_email_verified = true, updated_at = NOW() WHERE id = ?',
+      [decoded.id]
+    );
+
+    console.log(`✅ Email verified for user ID: ${decoded.id}`);
+
+    res.json({
+      success: true,
+      message: 'Email verified successfully! You can now login.',
+      alreadyVerified: false
+    });
+
+  } catch (error) {
+    console.error('Email verification error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Email verification failed. Please try again.'
+    });
+  }
+};
+
+/**
+ * @route   POST /api/auth/resend-verification
+ * @desc    Resend email verification link
+ * @access  Public
+ */
+const resendVerificationEmail = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email is required'
+      });
+    }
+
+    // Find user by email
+    const [users] = await pool.query(
+      'SELECT id, username, email, is_email_verified FROM users WHERE email = ?',
+      [email]
+    );
+
+    if (users.length === 0) {
+      // Don't reveal if user exists or not
+      return res.json({
+        success: true,
+        message: 'If an account exists with this email, a verification link has been sent.'
+      });
+    }
+
+    const user = users[0];
+
+    // Check if already verified
+    if (user.is_email_verified) {
+      return res.json({
+        success: true,
+        message: 'Email is already verified'
+      });
+    }
+
+    // Send verification email
+    try {
+      await sendVerificationEmail(user);
+      console.log(`✅ Verification email resent to ${email}`);
+    } catch (emailError) {
+      console.error('Failed to resend verification email:', emailError);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to send verification email. Please try again.'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Verification email sent! Please check your inbox.'
+    });
+
+  } catch (error) {
+    console.error('Resend verification error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to resend verification email. Please try again.'
+    });
+  }
+};
+
 module.exports = {
   login,
   register,
   getCurrentUser,
   changePassword,
-  logout
+  logout,
+  verifyEmail,
+  resendVerificationEmail
 };
