@@ -247,7 +247,7 @@ const createUser = async (req, res) => {
 const updateUser = async (req, res) => {
   try {
     const { id } = req.params;
-    const { full_name, gender, role, phone, department, office_location, street, city, state, pincode, assignedRegions } = req.body;
+    const { full_name, email, gender, role, phone, department, office_location, street, city, state, pincode, assignedRegions } = req.body;
 
     console.log('=== UPDATE USER DEBUG ===');
     console.log('User ID:', id);
@@ -266,6 +266,20 @@ const updateUser = async (req, res) => {
     if (full_name) {
       updates.push('full_name = ?');
       params.push(full_name);
+    }
+    if (email) {
+      // Check if email is already taken by another user
+      const [existingUsers] = await pool.query(
+        'SELECT id FROM users WHERE email = ? AND id != ?',
+        [email, id]
+      );
+
+      if (existingUsers.length > 0) {
+        return res.status(400).json({ success: false, error: 'Email already in use' });
+      }
+
+      updates.push('email = ?');
+      params.push(email);
     }
     if (gender) {
       updates.push('gender = ?');
@@ -579,6 +593,87 @@ const bulkDeleteUsers = async (req, res) => {
   }
 };
 
+/**
+ * @route   POST /api/users/bulk-assign-regions
+ * @desc    Bulk assign regions to multiple users
+ * @access  Private (Admin)
+ */
+const bulkAssignRegions = async (req, res) => {
+  try {
+    const { user_ids, region_names, action = 'assign' } = req.body;
+
+    if (!user_ids || !Array.isArray(user_ids) || user_ids.length === 0) {
+      return res.status(400).json({ success: false, error: 'User IDs array required' });
+    }
+
+    if (!region_names || !Array.isArray(region_names) || region_names.length === 0) {
+      return res.status(400).json({ success: false, error: 'Region names array required' });
+    }
+
+    console.log('=== BULK ASSIGN REGIONS ===');
+    console.log('Users:', user_ids);
+    console.log('Regions:', region_names);
+    console.log('Action:', action);
+
+    const assignedBy = req.user ? req.user.id : null;
+    let affectedUsers = 0;
+
+    for (const userId of user_ids) {
+      if (action === 'replace') {
+        // Remove all existing regions for this user
+        await pool.query('DELETE FROM user_regions WHERE user_id = ?', [userId]);
+      }
+
+      for (const regionName of region_names) {
+        // Find or create region
+        let [regions] = await pool.query(
+          'SELECT id FROM regions WHERE name = ? AND is_active = true',
+          [regionName]
+        );
+
+        let regionId;
+        if (regions.length > 0) {
+          regionId = regions[0].id;
+        } else {
+          // Create region
+          const regionCode = (regionName.substring(0, 2) + regionName.charAt(regionName.length - 1)).toUpperCase();
+          const [newRegion] = await pool.query(
+            `INSERT INTO regions (name, code, type, is_active) VALUES (?, ?, 'state', true)`,
+            [regionName, regionCode]
+          );
+          regionId = newRegion.insertId;
+        }
+
+        if (action === 'assign' || action === 'replace') {
+          // Assign region
+          await pool.query(
+            `INSERT INTO user_regions (user_id, region_id, access_level, assigned_by)
+             VALUES (?, ?, 'read', ?)
+             ON DUPLICATE KEY UPDATE assigned_by = ?`,
+            [userId, regionId, assignedBy, assignedBy]
+          );
+        } else if (action === 'revoke') {
+          // Revoke region
+          await pool.query(
+            'DELETE FROM user_regions WHERE user_id = ? AND region_id = ?',
+            [userId, regionId]
+          );
+        }
+      }
+      affectedUsers++;
+    }
+
+    res.json({
+      success: true,
+      message: `Regions ${action}ed for ${affectedUsers} user(s)`,
+      affectedUsers
+    });
+  } catch (error) {
+    console.error('Bulk assign regions error:', error);
+    res.status(500).json({ success: false, error: 'Failed to bulk assign regions' });
+  }
+};
+
 module.exports = {
   getAllUsers,
   getUserById,
@@ -590,5 +685,6 @@ module.exports = {
   getUserRegions,
   assignRegion,
   unassignRegion,
-  bulkDeleteUsers
+  bulkDeleteUsers,
+  bulkAssignRegions
 };

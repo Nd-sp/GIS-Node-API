@@ -29,15 +29,20 @@ const getAllTemporaryAccess = async (req, res) => {
              granter.username as granted_by_username
       FROM temporary_access ta
       INNER JOIN users u ON ta.user_id = u.id
-      INNER JOIN regions r ON ta.region_id = r.id
+      INNER JOIN regions r ON ta.resource_id = r.id
       INNER JOIN users granter ON ta.granted_by = granter.id
-      WHERE 1=1
+      WHERE ta.resource_type = 'region'
     `;
     const params = [];
 
     if (status) {
-      query += ' AND ta.status = ?';
-      params.push(status);
+      if (status === 'active') {
+        query += ' AND ta.revoked_at IS NULL AND ta.expires_at > NOW()';
+      } else if (status === 'revoked') {
+        query += ' AND ta.revoked_at IS NOT NULL';
+      } else if (status === 'expired') {
+        query += ' AND ta.revoked_at IS NULL AND ta.expires_at <= NOW()';
+      }
     }
 
     if (user_id) {
@@ -45,7 +50,7 @@ const getAllTemporaryAccess = async (req, res) => {
       params.push(user_id);
     }
 
-    query += ' ORDER BY ta.created_at DESC';
+    query += ' ORDER BY ta.granted_at DESC';
 
     const [access] = await pool.query(query, params);
 
@@ -73,31 +78,33 @@ const grantTemporaryAccess = async (req, res) => {
       });
     }
 
-    const { user_id, region_id, access_level, valid_from, valid_until, reason } = req.body;
+    const { user_id, region_name, access_level, expires_at, reason } = req.body;
 
-    if (!user_id || !region_id || !valid_until) {
+    if (!user_id || !region_name || !expires_at) {
       return res.status(400).json({
         success: false,
-        error: 'User ID, region ID, and valid_until are required'
+        error: 'User ID, region name, and expires_at are required'
       });
     }
 
     // Verify user exists
-    const [users] = await pool.query('SELECT id FROM users WHERE id = ?', [user_id]);
+    const [users] = await pool.query('SELECT id, full_name, email FROM users WHERE id = ?', [user_id]);
     if (users.length === 0) {
       return res.status(404).json({ success: false, error: 'User not found' });
     }
 
-    // Verify region exists
-    const [regions] = await pool.query('SELECT id FROM regions WHERE id = ?', [region_id]);
+    // Find region by name
+    const [regions] = await pool.query('SELECT id FROM regions WHERE name = ? AND is_active = true', [region_name]);
     if (regions.length === 0) {
       return res.status(404).json({ success: false, error: 'Region not found' });
     }
 
+    const regionId = regions[0].id;
+
     // Check if user already has permanent access
     const [existingAccess] = await pool.query(
       'SELECT id FROM user_regions WHERE user_id = ? AND region_id = ?',
-      [user_id, region_id]
+      [user_id, regionId]
     );
 
     if (existingAccess.length > 0) {
@@ -107,29 +114,50 @@ const grantTemporaryAccess = async (req, res) => {
       });
     }
 
+    // Check if active temporary access already exists
+    const [existingTemp] = await pool.query(
+      `SELECT id FROM temporary_access
+       WHERE user_id = ? AND resource_type = 'region' AND resource_id = ?
+       AND revoked_at IS NULL AND expires_at > NOW()`,
+      [user_id, regionId]
+    );
+
+    if (existingTemp.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'User already has active temporary access to this region'
+      });
+    }
+
     const [result] = await pool.query(
       `INSERT INTO temporary_access
-       (user_id, region_id, access_level, valid_from, valid_until, reason, granted_by, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'active')`,
+       (user_id, resource_type, resource_id, access_level, reason, granted_by, expires_at)
+       VALUES (?, 'region', ?, ?, ?, ?, ?)`,
       [
         user_id,
-        region_id,
+        regionId,
         access_level || 'read',
-        valid_from || new Date(),
-        valid_until,
         reason,
-        granterId
+        granterId,
+        expires_at
       ]
     );
 
     res.status(201).json({
       success: true,
-      access: {
+      grant: {
         id: result.insertId,
         user_id,
-        region_id,
+        user_name: users[0].full_name,
+        user_email: users[0].email,
+        region_name,
+        resource_id: regionId,
         access_level: access_level || 'read',
-        valid_until
+        granted_at: new Date(),
+        expires_at,
+        reason,
+        granted_by: granterId,
+        status: 'active'
       }
     });
   } catch (error) {
@@ -146,6 +174,7 @@ const grantTemporaryAccess = async (req, res) => {
 const revokeTemporaryAccess = async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = req.user.id;
     const userRole = req.user.role;
 
     if (userRole !== 'admin' && userRole !== 'manager') {
@@ -157,7 +186,7 @@ const revokeTemporaryAccess = async (req, res) => {
 
     // Check if access exists
     const [access] = await pool.query(
-      'SELECT id, status FROM temporary_access WHERE id = ?',
+      'SELECT id, revoked_at FROM temporary_access WHERE id = ?',
       [id]
     );
 
@@ -165,7 +194,7 @@ const revokeTemporaryAccess = async (req, res) => {
       return res.status(404).json({ success: false, error: 'Temporary access not found' });
     }
 
-    if (access[0].status === 'revoked') {
+    if (access[0].revoked_at !== null) {
       return res.status(400).json({
         success: false,
         error: 'Access already revoked'
@@ -173,8 +202,8 @@ const revokeTemporaryAccess = async (req, res) => {
     }
 
     await pool.query(
-      'UPDATE temporary_access SET status = ?, revoked_at = NOW() WHERE id = ?',
-      ['revoked', id]
+      'UPDATE temporary_access SET revoked_at = NOW(), revoked_by = ? WHERE id = ?',
+      [userId, id]
     );
 
     res.json({ success: true, message: 'Temporary access revoked successfully' });

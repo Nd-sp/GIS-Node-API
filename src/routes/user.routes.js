@@ -11,7 +11,8 @@ const {
   getUserRegions,
   assignRegion,
   unassignRegion,
-  bulkDeleteUsers
+  bulkDeleteUsers,
+  bulkAssignRegions
 } = require('../controllers/userController');
 const { authenticate, authorize } = require('../middleware/auth');
 
@@ -32,6 +33,9 @@ router.put('/:id', updateUser);
 
 // DELETE /api/users/bulk-delete - Bulk delete users (must be BEFORE /:id route)
 router.delete('/bulk-delete', authorize('admin'), bulkDeleteUsers);
+
+// POST /api/users/bulk-assign-regions - Bulk assign regions to users (must be BEFORE /:id route)
+router.post('/bulk-assign-regions', authorize('admin'), bulkAssignRegions);
 
 // DELETE /api/users/:id - Delete user
 router.delete('/:id', authorize('admin'), deleteUser);

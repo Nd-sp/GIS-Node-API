@@ -16,20 +16,34 @@ const login = async (req, res) => {
     if (!email || !password) {
       return res.status(400).json({
         success: false,
-        error: 'Email and password are required'
+        error: 'Email/Username/UserID and password are required'
       });
     }
 
-    // Find user by email
-    const [users] = await pool.query(
-      'SELECT * FROM users WHERE email = ?',
-      [email]
-    );
+    // Find user by email, username, or user ID
+    // Try to match against email, username, or id (if numeric)
+    let query;
+    let params;
+
+    // Check if input is numeric (could be user ID)
+    const isNumeric = /^\d+$/.test(email);
+
+    if (isNumeric) {
+      // Search by ID, username, or email
+      query = 'SELECT * FROM users WHERE id = ? OR username = ? OR email = ?';
+      params = [parseInt(email), email, email];
+    } else {
+      // Search by email or username
+      query = 'SELECT * FROM users WHERE email = ? OR username = ?';
+      params = [email, email];
+    }
+
+    const [users] = await pool.query(query, params);
 
     if (users.length === 0) {
       return res.status(401).json({
         success: false,
-        error: 'Invalid email or password'
+        error: 'Invalid credentials'
       });
     }
 
