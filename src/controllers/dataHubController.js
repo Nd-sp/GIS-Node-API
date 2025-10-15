@@ -1,6 +1,105 @@
 const { pool } = require('../config/database');
 
 /**
+ * @route   GET /api/datahub/all
+ * @desc    Get all user's data (measurements, drawings, etc.)
+ * @access  Private
+ */
+const getAllData = async (req, res) => {
+  try {
+    const currentUserId = req.user.id;
+    const currentUserRole = (req.user.role || '').toLowerCase();
+    const { filter, userId: filterUserId } = req.query;
+    const allData = [];
+
+    console.log('📊 DataHub getAllData request:', {
+      currentUserId,
+      currentUserRole,
+      filter,
+      filterUserId
+    });
+
+    // Build WHERE condition based on role and filter
+    let whereCondition = 'WHERE user_id = ?';
+    let whereParams = [currentUserId];
+
+    if (filter === 'all' && (currentUserRole === 'admin' || currentUserRole === 'manager')) {
+      whereCondition = '';
+      whereParams = [];
+      console.log('📊 Admin/Manager viewing ALL users data');
+    } else if (filter === 'user' && (currentUserRole === 'admin' || currentUserRole === 'manager') && filterUserId) {
+      whereCondition = 'WHERE user_id = ?';
+      whereParams = [parseInt(filterUserId)];
+      console.log('📊 Admin/Manager viewing user', filterUserId);
+    }
+
+    // Fetch all measurement types with username
+    const [distances] = await pool.query(
+      `SELECT d.*, u.username as username FROM distance_measurements d
+       LEFT JOIN users u ON d.user_id = u.id
+       ${whereCondition} ORDER BY d.created_at DESC`,
+      whereParams
+    );
+    distances.forEach(d => allData.push({ ...d, type: 'Distance' }));
+
+    const [polygons] = await pool.query(
+      `SELECT p.*, u.username as username FROM polygon_drawings p
+       LEFT JOIN users u ON p.user_id = u.id
+       ${whereCondition} ORDER BY p.created_at DESC`,
+      whereParams
+    );
+    polygons.forEach(p => allData.push({ ...p, type: 'Polygon' }));
+
+    const [circles] = await pool.query(
+      `SELECT c.*, u.username as username FROM circle_drawings c
+       LEFT JOIN users u ON c.user_id = u.id
+       ${whereCondition} ORDER BY c.created_at DESC`,
+      whereParams
+    );
+    circles.forEach(c => allData.push({ ...c, type: 'Circle' }));
+
+    const [elevations] = await pool.query(
+      `SELECT e.*, u.username as username FROM elevation_profiles e
+       LEFT JOIN users u ON e.user_id = u.id
+       ${whereCondition} ORDER BY e.created_at DESC`,
+      whereParams
+    );
+    elevations.forEach(e => allData.push({ ...e, type: 'Elevation' }));
+
+    const [infrastructures] = await pool.query(
+      `SELECT i.*, u.username as username FROM infrastructure_items i
+       LEFT JOIN users u ON i.user_id = u.id
+       ${whereCondition} ORDER BY i.created_at DESC`,
+      whereParams
+    );
+    infrastructures.forEach(i => allData.push({ ...i, type: 'Infrastructure' }));
+
+    const [sectors] = await pool.query(
+      `SELECT s.*, u.username as username FROM sector_rf_data s
+       LEFT JOIN users u ON s.user_id = u.id
+       ${whereCondition} ORDER BY s.created_at DESC`,
+      whereParams
+    );
+    sectors.forEach(s => allData.push({ ...s, type: 'SectorRF' }));
+
+    console.log('📊 DataHub response:', {
+      totalItems: allData.length,
+      distances: distances.length,
+      polygons: polygons.length,
+      circles: circles.length,
+      elevations: elevations.length,
+      infrastructures: infrastructures.length,
+      sectors: sectors.length
+    });
+
+    res.json({ success: true, data: allData, count: allData.length });
+  } catch (error) {
+    console.error('Get all data error:', error);
+    res.status(500).json({ success: false, error: 'Failed to get data' });
+  }
+};
+
+/**
  * @route   POST /api/datahub/import
  * @desc    Import data (user-wise)
  * @access  Private
@@ -234,6 +333,7 @@ const downloadExport = async (req, res) => {
 };
 
 module.exports = {
+  getAllData,
   importData,
   getImportHistory,
   exportData,

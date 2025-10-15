@@ -95,6 +95,14 @@ const login = async (req, res) => {
 
     // Map regions to just names for frontend
     const assignedRegions = regions.map(r => r.name);
+    
+    // Debug logging for login regions
+    console.log(`🔐 LOGIN - User: ${user.username} (ID: ${user.id})`);
+    console.log(`   Regions from DB: ${regions.length}`);
+    console.log(`   Regions being sent: ${assignedRegions.length}`);
+    if (assignedRegions.length !== regions.length) {
+      console.error(`   ⚠️  MISMATCH: DB has ${regions.length} but sending ${assignedRegions.length}`);
+    }
 
     // Return user data and token
     res.json({

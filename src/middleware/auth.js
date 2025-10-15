@@ -10,6 +10,7 @@ const authenticate = async (req, res, next) => {
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      console.log('❌ Auth failed: No token provided');
       return res.status(401).json({
         success: false,
         error: 'Access denied. No token provided.'
@@ -18,10 +19,12 @@ const authenticate = async (req, res, next) => {
 
     // Extract token
     const token = authHeader.split(' ')[1];
+    console.log('🔑 Token received:', token.substring(0, 50) + '...');
 
     try {
       // Verify token
       const decoded = verifyToken(token);
+      console.log('✅ Token decoded:', { id: decoded.id, email: decoded.email, role: decoded.role });
 
       // Get fresh user data from database
       const [users] = await pool.query(
@@ -51,6 +54,7 @@ const authenticate = async (req, res, next) => {
 
       next();
     } catch (tokenError) {
+      console.error('❌ Token verification failed:', tokenError.message);
       return res.status(401).json({
         success: false,
         error: 'Invalid or expired token'

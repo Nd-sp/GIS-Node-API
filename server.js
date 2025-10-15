@@ -7,6 +7,7 @@ require("dotenv").config();
 
 const { testConnection } = require("./src/config/database");
 const { errorHandler, notFound } = require("./src/middleware/errorHandler");
+const { startCleanupScheduler } = require("./src/utils/temporaryAccessCleanup");
 
 // Initialize Express app
 const app = express();
@@ -34,13 +35,27 @@ if (process.env.NODE_ENV === "development") {
   app.use(morgan("dev"));
 }
 
-// Rate limiting
+// Rate limiting - Industry standard (more permissive for development)
 const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 900000, // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 60000, // 1 minute (reduced window)
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 500, // 500 requests per minute
   message: "Too many requests from this IP, please try again later.",
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
+  skip: (req) => {
+    // Skip rate limiting for critical endpoints to prevent blocking during initial page load
+    const skipPaths = [
+      '/auth/',
+      '/temporary-access/my-access',
+      '/users',
+      '/datahub',
+      '/measurements/',
+      '/drawings/',
+      '/rf/',
+      '/elevation'
+    ];
+    return skipPaths.some(path => req.path.includes(path));
+  }
 });
 app.use("/api/", limiter);
 
@@ -151,6 +166,10 @@ try {
   const permissionRoutes = require("./src/routes/permission.routes");
   app.use("/api/permissions", permissionRoutes);
 
+  // Reports routes
+  const reportsRoutes = require("./src/routes/reports.routes");
+  app.use("/api/reports", reportsRoutes);
+
   console.log("✅ All routes loaded successfully");
 } catch (error) {
   console.warn("⚠️ Some routes not loaded yet:", error.message);
@@ -163,7 +182,7 @@ app.use(notFound);
 app.use(errorHandler);
 
 // Server configuration
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5005;
 
 // Start server
 const startServer = async () => {
@@ -177,6 +196,9 @@ const startServer = async () => {
       );
       process.exit(1);
     }
+
+    // Start temporary access cleanup scheduler
+    startCleanupScheduler();
 
     // Start Express server
     app.listen(PORT, () => {

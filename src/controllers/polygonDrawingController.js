@@ -1,4 +1,5 @@
 const { pool } = require('../config/database');
+const { logAudit } = require('./auditController');
 
 /**
  * @route   GET /api/drawings/polygon
@@ -7,20 +8,55 @@ const { pool } = require('../config/database');
  */
 const getAllPolygons = async (req, res) => {
   try {
-    const userId = req.user.id;
-    const { regionId } = req.query;
+    const currentUserId = req.user.id;
+const currentUserRole = (req.user.role || '').toLowerCase();
+    const { regionId, filter, userId: filterUserId } = req.query;
 
-    let query = 'SELECT * FROM polygon_drawings WHERE user_id = ?';
-    const params = [userId];
+    console.log('▭ Polygon drawings request:', {
+      currentUserId,
+      currentUserRole,
+      filter,
+      filterUserId
+    });
+
+    // Base query with username join
+    let query = `
+      SELECT pd.*, u.username as username
+      FROM polygon_drawings pd
+      LEFT JOIN users u ON pd.user_id = u.id
+    `;
+    let params = [];
+    let whereConditions = [];
+
+    // Apply filtering logic
+if (filter === 'all' && (currentUserRole === 'admin' || currentUserRole === 'manager')) {
+      console.log('▭ Admin/Manager viewing ALL users data');
+} else if (filter === 'user' && (currentUserRole === 'admin' || currentUserRole === 'manager') && filterUserId) {
+      whereConditions.push('pd.user_id = ?');
+      params.push(parseInt(filterUserId));
+      console.log('▭ Admin/Manager viewing user', filterUserId);
+    } else {
+      whereConditions.push('pd.user_id = ?');
+      params.push(currentUserId);
+      console.log('▭ User viewing own data only');
+    }
 
     if (regionId) {
-      query += ' AND region_id = ?';
+      whereConditions.push('pd.region_id = ?');
       params.push(regionId);
     }
 
-    query += ' ORDER BY created_at DESC';
+    if (whereConditions.length > 0) {
+      query += ' WHERE ' + whereConditions.join(' AND ');
+    }
+    query += ' ORDER BY pd.created_at DESC';
+
+    console.log('▭ Final query:', query);
+    console.log('▭ Query params:', params);
 
     const [polygons] = await pool.query(query, params);
+
+    console.log('▭ Found polygons:', polygons.length);
 
     res.json({ success: true, polygons });
   } catch (error) {
@@ -102,6 +138,14 @@ const createPolygon = async (req, res) => {
       ]
     );
 
+    // Log audit
+    await logAudit(userId, 'CREATE', 'polygon_drawing', result.insertId, {
+      polygon_name,
+      area,
+      perimeter,
+      vertices_count: coordinates?.length || 0
+    }, req);
+
     res.status(201).json({
       success: true,
       polygon: {
@@ -168,6 +212,11 @@ const updatePolygon = async (req, res) => {
       params
     );
 
+    // Log audit
+    await logAudit(userId, 'UPDATE', 'polygon_drawing', id, {
+      updated_fields: { polygon_name, fill_color, stroke_color, opacity, notes, is_saved }
+    }, req);
+
     res.json({ success: true, message: 'Polygon updated successfully' });
   } catch (error) {
     console.error('Update polygon error:', error);
@@ -185,7 +234,21 @@ const deletePolygon = async (req, res) => {
     const { id } = req.params;
     const userId = req.user.id;
 
+    // Get polygon details before deletion for audit log
+    const [polygons] = await pool.query(
+      'SELECT polygon_name, area FROM polygon_drawings WHERE id = ? AND user_id = ?',
+      [id, userId]
+    );
+
     await pool.query('DELETE FROM polygon_drawings WHERE id = ? AND user_id = ?', [id, userId]);
+
+    // Log audit
+    if (polygons.length > 0) {
+      await logAudit(userId, 'DELETE', 'polygon_drawing', id, {
+        polygon_name: polygons[0].polygon_name,
+        area: polygons[0].area
+      }, req);
+    }
 
     res.json({ success: true, message: 'Polygon deleted successfully' });
   } catch (error) {

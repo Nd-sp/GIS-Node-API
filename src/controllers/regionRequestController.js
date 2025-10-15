@@ -8,7 +8,7 @@ const { pool } = require('../config/database');
 const getAllRequests = async (req, res) => {
   try {
     const userId = req.user.id;
-    const userRole = req.user.role;
+    const userRole = req.user.role?.toLowerCase(); // Case-insensitive role check
     const { status } = req.query;
 
     let query = `
@@ -16,14 +16,16 @@ const getAllRequests = async (req, res) => {
              u.username,
              u.full_name,
              u.email,
+             u.role,
              r.name as region_name,
              r.code as region_code,
              r.type as region_type,
-             approver.username as processed_by_username
+             reviewer.username as reviewed_by_username,
+             reviewer.full_name as reviewed_by_name
       FROM region_requests rr
       INNER JOIN users u ON rr.user_id = u.id
       INNER JOIN regions r ON rr.region_id = r.id
-      LEFT JOIN users approver ON rr.processed_by = approver.id
+      LEFT JOIN users reviewer ON rr.reviewed_by = reviewer.id
       WHERE 1=1
     `;
     const params = [];
@@ -39,7 +41,7 @@ const getAllRequests = async (req, res) => {
       params.push(status);
     }
 
-    query += ' ORDER BY rr.created_at DESC';
+    query += ' ORDER BY rr.requested_at DESC';
 
     const [requests] = await pool.query(query, params);
 
@@ -58,38 +60,58 @@ const getAllRequests = async (req, res) => {
 const createRequest = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { region_id, access_level, justification } = req.body;
+    const { region_id, region_name, request_type, reason } = req.body;
 
-    if (!region_id || !justification) {
+    // Accept either region_id or region_name
+    if ((!region_id && !region_name) || !request_type) {
       return res.status(400).json({
         success: false,
-        error: 'Region ID and justification are required'
+        error: 'Region (ID or name) and request type are required'
       });
     }
 
-    // Verify region exists
-    const [regions] = await pool.query('SELECT id FROM regions WHERE id = ?', [region_id]);
-    if (regions.length === 0) {
-      return res.status(404).json({ success: false, error: 'Region not found' });
-    }
-
-    // Check if user already has access
-    const [existingAccess] = await pool.query(
-      'SELECT id FROM user_regions WHERE user_id = ? AND region_id = ?',
-      [userId, region_id]
-    );
-
-    if (existingAccess.length > 0) {
+    if (!['access', 'modification', 'creation'].includes(request_type)) {
       return res.status(400).json({
         success: false,
-        error: 'You already have access to this region'
+        error: 'Invalid request type. Must be: access, modification, or creation'
       });
+    }
+
+    // Find region by ID or name
+    let regionId;
+    if (region_id) {
+      const [regions] = await pool.query('SELECT id FROM regions WHERE id = ?', [region_id]);
+      if (regions.length === 0) {
+        return res.status(404).json({ success: false, error: 'Region not found' });
+      }
+      regionId = region_id;
+    } else {
+      const [regions] = await pool.query('SELECT id FROM regions WHERE name = ? AND is_active = true', [region_name]);
+      if (regions.length === 0) {
+        return res.status(404).json({ success: false, error: 'Region not found' });
+      }
+      regionId = regions[0].id;
+    }
+
+    // Check if user already has access (for access requests)
+    if (request_type === 'access') {
+      const [existingAccess] = await pool.query(
+        'SELECT id FROM user_regions WHERE user_id = ? AND region_id = ?',
+        [userId, regionId]
+      );
+
+      if (existingAccess.length > 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'You already have access to this region'
+        });
+      }
     }
 
     // Check for pending request
     const [pendingRequests] = await pool.query(
-      'SELECT id FROM region_requests WHERE user_id = ? AND region_id = ? AND status = ?',
-      [userId, region_id, 'pending']
+      'SELECT id FROM region_requests WHERE user_id = ? AND region_id = ? AND request_type = ? AND status = ?',
+      [userId, regionId, request_type, 'pending']
     );
 
     if (pendingRequests.length > 0) {
@@ -101,18 +123,21 @@ const createRequest = async (req, res) => {
 
     const [result] = await pool.query(
       `INSERT INTO region_requests
-       (user_id, region_id, access_level, justification, status)
+       (user_id, region_id, request_type, reason, status)
        VALUES (?, ?, ?, ?, 'pending')`,
-      [userId, region_id, access_level || 'read', justification]
+      [userId, regionId, request_type, reason || '']
     );
+
+    console.log(`✅ Created region request ID: ${result.insertId} for user ${userId} - ${request_type} for region ${regionId}`);
 
     res.status(201).json({
       success: true,
       request: {
         id: result.insertId,
         user_id: userId,
-        region_id,
-        access_level: access_level || 'read',
+        region_id: regionId,
+        request_type,
+        reason,
         status: 'pending'
       }
     });
@@ -130,10 +155,11 @@ const createRequest = async (req, res) => {
 const approveRequest = async (req, res) => {
   try {
     const { id } = req.params;
-    const approverId = req.user.id;
-    const approverRole = req.user.role;
+    const reviewerId = req.user.id;
+    const reviewerRole = req.user.role?.toLowerCase(); // Case-insensitive role check
+    const { review_notes } = req.body;
 
-    if (approverRole !== 'admin' && approverRole !== 'manager') {
+    if (reviewerRole !== 'admin' && reviewerRole !== 'manager') {
       return res.status(403).json({
         success: false,
         error: 'Only admin or manager can approve requests'
@@ -167,29 +193,30 @@ const approveRequest = async (req, res) => {
       // Update request status
       await connection.query(
         `UPDATE region_requests
-         SET status = 'approved', processed_by = ?, processed_at = NOW()
+         SET status = 'approved', reviewed_by = ?, reviewed_at = NOW(), review_notes = ?
          WHERE id = ?`,
-        [approverId, id]
+        [reviewerId, review_notes, id]
       );
 
-      // Grant access to user
-      await connection.query(
-        `INSERT INTO user_regions (user_id, region_id, access_level, assigned_by)
-         VALUES (?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE access_level = ?, assigned_by = ?`,
-        [
-          request.user_id,
-          request.region_id,
-          request.access_level,
-          approverId,
-          request.access_level,
-          approverId
-        ]
-      );
+      // Grant access based on request type
+      if (request.request_type === 'access') {
+        await connection.query(
+          `INSERT INTO user_regions (user_id, region_id, access_level, assigned_by)
+           VALUES (?, ?, 'read', ?)
+           ON DUPLICATE KEY UPDATE access_level = 'read', assigned_by = ?`,
+          [request.user_id, request.region_id, reviewerId, reviewerId]
+        );
+      } else if (request.request_type === 'creation') {
+        // Activate the region if it was created
+        await connection.query(
+          'UPDATE regions SET is_active = true WHERE id = ?',
+          [request.region_id]
+        );
+      }
 
       await connection.commit();
 
-      res.json({ success: true, message: 'Request approved and access granted' });
+      res.json({ success: true, message: 'Request approved successfully' });
     } catch (err) {
       await connection.rollback();
       throw err;
@@ -210,11 +237,11 @@ const approveRequest = async (req, res) => {
 const rejectRequest = async (req, res) => {
   try {
     const { id } = req.params;
-    const approverId = req.user.id;
-    const approverRole = req.user.role;
-    const { rejection_reason } = req.body;
+    const reviewerId = req.user.id;
+    const reviewerRole = req.user.role?.toLowerCase(); // Case-insensitive role check
+    const { review_notes } = req.body;
 
-    if (approverRole !== 'admin' && approverRole !== 'manager') {
+    if (reviewerRole !== 'admin' && reviewerRole !== 'manager') {
       return res.status(403).json({
         success: false,
         error: 'Only admin or manager can reject requests'
@@ -241,11 +268,11 @@ const rejectRequest = async (req, res) => {
     await pool.query(
       `UPDATE region_requests
        SET status = 'rejected',
-           rejection_reason = ?,
-           processed_by = ?,
-           processed_at = NOW()
+           review_notes = ?,
+           reviewed_by = ?,
+           reviewed_at = NOW()
        WHERE id = ?`,
-      [rejection_reason, approverId, id]
+      [review_notes || 'Rejected', reviewerId, id]
     );
 
     res.json({ success: true, message: 'Request rejected successfully' });
@@ -255,9 +282,53 @@ const rejectRequest = async (req, res) => {
   }
 };
 
+/**
+ * @route   DELETE /api/region-requests/:id
+ * @desc    Delete region access request (admin or own request)
+ * @access  Private
+ */
+const deleteRequest = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const userRole = req.user.role?.toLowerCase();
+
+    // Get request details
+    const [requests] = await pool.query(
+      'SELECT user_id FROM region_requests WHERE id = ?',
+      [id]
+    );
+
+    if (requests.length === 0) {
+      return res.status(404).json({ success: false, error: 'Request not found' });
+    }
+
+    const request = requests[0];
+
+    // Only admin can delete any request, or users can delete their own
+    if (userRole !== 'admin' && request.user_id !== userId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Permission denied: Only administrators or the requester can delete this request'
+      });
+    }
+
+    // Delete the request
+    await pool.query('DELETE FROM region_requests WHERE id = ?', [id]);
+
+    console.log(`✅ Deleted region request ID: ${id} by user ${userId}`);
+
+    res.json({ success: true, message: 'Request deleted successfully' });
+  } catch (error) {
+    console.error('Delete request error:', error);
+    res.status(500).json({ success: false, error: 'Failed to delete request' });
+  }
+};
+
 module.exports = {
   getAllRequests,
   createRequest,
   approveRequest,
-  rejectRequest
+  rejectRequest,
+  deleteRequest
 };

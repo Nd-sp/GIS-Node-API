@@ -1,4 +1,5 @@
 const { pool } = require('../config/database');
+const { logAudit } = require('./auditController');
 
 /**
  * @route   GET /api/drawings/circle
@@ -7,20 +8,55 @@ const { pool } = require('../config/database');
  */
 const getAllCircles = async (req, res) => {
   try {
-    const userId = req.user.id;
-    const { regionId } = req.query;
+    const currentUserId = req.user.id;
+const currentUserRole = (req.user.role || '').toLowerCase();
+    const { regionId, filter, userId: filterUserId } = req.query;
 
-    let query = 'SELECT * FROM circle_drawings WHERE user_id = ?';
-    const params = [userId];
+    console.log('⭕ Circle drawings request:', {
+      currentUserId,
+      currentUserRole,
+      filter,
+      filterUserId
+    });
+
+    // Base query with username join
+    let query = `
+      SELECT cd.*, u.username as username
+      FROM circle_drawings cd
+      LEFT JOIN users u ON cd.user_id = u.id
+    `;
+    let params = [];
+    let whereConditions = [];
+
+    // Apply filtering logic
+if (filter === 'all' && (currentUserRole === 'admin' || currentUserRole === 'manager')) {
+      console.log('⭕ Admin/Manager viewing ALL users data');
+} else if (filter === 'user' && (currentUserRole === 'admin' || currentUserRole === 'manager') && filterUserId) {
+      whereConditions.push('cd.user_id = ?');
+      params.push(parseInt(filterUserId));
+      console.log('⭕ Admin/Manager viewing user', filterUserId);
+    } else {
+      whereConditions.push('cd.user_id = ?');
+      params.push(currentUserId);
+      console.log('⭕ User viewing own data only');
+    }
 
     if (regionId) {
-      query += ' AND region_id = ?';
+      whereConditions.push('cd.region_id = ?');
       params.push(regionId);
     }
 
-    query += ' ORDER BY created_at DESC';
+    if (whereConditions.length > 0) {
+      query += ' WHERE ' + whereConditions.join(' AND ');
+    }
+    query += ' ORDER BY cd.created_at DESC';
+
+    console.log('⭕ Final query:', query);
+    console.log('⭕ Query params:', params);
 
     const [circles] = await pool.query(query, params);
+
+    console.log('⭕ Found circles:', circles.length);
 
     res.json({ success: true, circles });
   } catch (error) {
@@ -105,6 +141,14 @@ const createCircle = async (req, res) => {
       ]
     );
 
+    // Log audit
+    await logAudit(userId, 'CREATE', 'circle_drawing', result.insertId, {
+      circle_name,
+      center_lat,
+      center_lng,
+      radius
+    }, req);
+
     res.status(201).json({
       success: true,
       circle: {
@@ -172,6 +216,11 @@ const updateCircle = async (req, res) => {
       params
     );
 
+    // Log audit
+    await logAudit(userId, 'UPDATE', 'circle_drawing', id, {
+      updated_fields: { circle_name, fill_color, stroke_color, opacity, notes, is_saved }
+    }, req);
+
     res.json({ success: true, message: 'Circle updated successfully' });
   } catch (error) {
     console.error('Update circle error:', error);
@@ -189,7 +238,21 @@ const deleteCircle = async (req, res) => {
     const { id } = req.params;
     const userId = req.user.id;
 
+    // Get circle details before deletion for audit log
+    const [circles] = await pool.query(
+      'SELECT circle_name, radius FROM circle_drawings WHERE id = ? AND user_id = ?',
+      [id, userId]
+    );
+
     await pool.query('DELETE FROM circle_drawings WHERE id = ? AND user_id = ?', [id, userId]);
+
+    // Log audit
+    if (circles.length > 0) {
+      await logAudit(userId, 'DELETE', 'circle_drawing', id, {
+        circle_name: circles[0].circle_name,
+        radius: circles[0].radius
+      }, req);
+    }
 
     res.json({ success: true, message: 'Circle deleted successfully' });
   } catch (error) {

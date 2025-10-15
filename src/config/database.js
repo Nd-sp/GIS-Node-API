@@ -12,7 +12,8 @@ const pool = mysql.createPool({
   connectionLimit: 10,
   queueLimit: 0,
   enableKeepAlive: true,
-  keepAliveInitialDelay: 0
+  keepAliveInitialDelay: 0,
+  timezone: '+00:00' // Force UTC timezone to prevent time mismatch
 });
 
 // Test database connection
@@ -21,6 +22,18 @@ const testConnection = async () => {
     const connection = await pool.getConnection();
     console.log('✅ MySQL Database Connected Successfully!');
     console.log(`📊 Database: ${process.env.DB_NAME}`);
+
+    // Check timezone settings (optional - don't fail if this errors)
+    try {
+      const [tzResult] = await connection.query('SELECT @@session.time_zone as tz');
+      const [timeResult] = await connection.query('SELECT NOW() as server_time, UTC_TIMESTAMP() as utc_time');
+      console.log('🕐 MySQL Timezone:', tzResult[0].tz);
+      console.log('🕐 Server Time:', timeResult[0].server_time);
+      console.log('🕐 UTC Time:', timeResult[0].utc_time);
+    } catch (tzError) {
+      console.log('⚠️  Could not check timezone settings:', tzError.message);
+    }
+
     connection.release();
     return true;
   } catch (error) {

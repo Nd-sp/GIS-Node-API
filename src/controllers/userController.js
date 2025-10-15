@@ -1,5 +1,44 @@
 const { pool } = require('../config/database');
 const { hashPassword } = require('../utils/bcrypt');
+const { logAudit } = require('./auditController');
+
+/**
+ * Helper function to calculate time remaining
+ */
+const calculateTimeRemaining = (seconds) => {
+  if (!seconds || seconds <= 0) {
+    return {
+      expired: true,
+      display: 'Expired',
+      days: 0,
+      hours: 0,
+      minutes: 0,
+      seconds: 0,
+      total_seconds: 0
+    };
+  }
+
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+
+  let display = '';
+  if (days > 0) display += `${days}d `;
+  if (hours > 0) display += `${hours}h `;
+  if (minutes > 0) display += `${minutes}m `;
+  if (secs > 0 && days === 0) display += `${secs}s`;
+
+  return {
+    expired: false,
+    display: display.trim() || 'Just now',
+    days,
+    hours,
+    minutes,
+    seconds: secs,
+    total_seconds: seconds
+  };
+};
 
 /**
  * @route   GET /api/users
@@ -38,7 +77,7 @@ const getAllUsers = async (req, res) => {
 
     const [users] = await pool.query(query, params);
 
-    // Fetch regions for each user
+    // Fetch regions and temporary access for each user
     for (const user of users) {
       const [regions] = await pool.query(
         `SELECT r.name
@@ -48,6 +87,38 @@ const getAllUsers = async (req, res) => {
         [user.id]
       );
       user.assignedRegions = regions.map(r => r.name);
+      
+      // Debug logging for region assignments
+      if (regions.length > 0) {
+        console.log(`📍 User ${user.username} (ID: ${user.id}) has ${regions.length} regions assigned`);
+      }
+
+      // Fetch active temporary access with time remaining
+      const [tempAccess] = await pool.query(
+        `SELECT ta.id, r.name as region_name, ta.expires_at,
+                TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), ta.expires_at) as seconds_remaining,
+                u2.full_name as granted_by_name, ta.granted_at, ta.reason
+         FROM temporary_access ta
+         INNER JOIN regions r ON ta.resource_id = r.id
+         LEFT JOIN users u2 ON ta.granted_by = u2.id
+         WHERE ta.user_id = ?
+           AND ta.resource_type = 'region'
+           AND ta.revoked_at IS NULL
+           AND ta.expires_at > UTC_TIMESTAMP()
+         ORDER BY ta.expires_at ASC`,
+        [user.id]
+      );
+
+      user.temporaryAccess = tempAccess.map(ta => ({
+        id: ta.id,
+        region: ta.region_name,
+        expiresAt: ta.expires_at,
+        grantedAt: ta.granted_at,
+        grantedByName: ta.granted_by_name,
+        reason: ta.reason,
+        secondsRemaining: ta.seconds_remaining,
+        timeRemaining: calculateTimeRemaining(ta.seconds_remaining)
+      }));
     }
 
     res.json({
@@ -229,6 +300,15 @@ const createUser = async (req, res) => {
       [userId]
     );
 
+    // Log audit
+    await logAudit(createdBy, 'CREATE', 'user', userId, {
+      username,
+      email,
+      full_name,
+      role: role || 'viewer',
+      assignedRegions: assignedRegions || []
+    }, req);
+
     res.status(201).json({
       success: true,
       user: newUser[0]
@@ -247,7 +327,7 @@ const createUser = async (req, res) => {
 const updateUser = async (req, res) => {
   try {
     const { id } = req.params;
-    const { full_name, email, gender, role, phone, department, office_location, street, city, state, pincode, assignedRegions } = req.body;
+    const { username, full_name, email, gender, role, phone, department, office_location, street, city, state, pincode, assignedRegions } = req.body;
 
     console.log('=== UPDATE USER DEBUG ===');
     console.log('User ID:', id);
@@ -263,6 +343,20 @@ const updateUser = async (req, res) => {
     const updates = [];
     const params = [];
 
+    if (username) {
+      // Check if username is already taken by another user
+      const [existingUsers] = await pool.query(
+        'SELECT id FROM users WHERE username = ? AND id != ?',
+        [username, id]
+      );
+
+      if (existingUsers.length > 0) {
+        return res.status(400).json({ success: false, error: 'Username already in use' });
+      }
+
+      updates.push('username = ?');
+      params.push(username);
+    }
     if (full_name) {
       updates.push('full_name = ?');
       params.push(full_name);
@@ -409,6 +503,12 @@ const updateUser = async (req, res) => {
       [id]
     );
 
+    // Log audit
+    await logAudit(req.user.id, 'UPDATE', 'user', id, {
+      updated_fields: { username, full_name, email, gender, role, phone, department, office_location, street, city, state, pincode },
+      assignedRegions: assignedRegions || []
+    }, req);
+
     res.json({
       success: true,
       message: 'User updated successfully',
@@ -434,7 +534,23 @@ const deleteUser = async (req, res) => {
       return res.status(400).json({ success: false, error: 'Cannot delete yourself' });
     }
 
+    // Get user details before deletion for audit log
+    const [users] = await pool.query(
+      'SELECT username, email, full_name, role FROM users WHERE id = ?',
+      [id]
+    );
+
     await pool.query('DELETE FROM users WHERE id = ?', [id]);
+
+    // Log audit
+    if (users.length > 0) {
+      await logAudit(req.user.id, 'DELETE', 'user', id, {
+        username: users[0].username,
+        email: users[0].email,
+        full_name: users[0].full_name,
+        role: users[0].role
+      }, req);
+    }
 
     res.json({ success: true, message: 'User deleted successfully' });
   } catch (error) {
@@ -453,6 +569,12 @@ const activateUser = async (req, res) => {
     const { id } = req.params;
 
     await pool.query('UPDATE users SET is_active = true WHERE id = ?', [id]);
+
+    // Log audit
+    await logAudit(req.user.id, 'ACTIVATE', 'user', id, {
+      action: 'activate',
+      is_active: true
+    }, req);
 
     res.json({ success: true, message: 'User activated successfully' });
   } catch (error) {
@@ -476,6 +598,12 @@ const deactivateUser = async (req, res) => {
     }
 
     await pool.query('UPDATE users SET is_active = false WHERE id = ?', [id]);
+
+    // Log audit
+    await logAudit(req.user.id, 'DEACTIVATE', 'user', id, {
+      action: 'deactivate',
+      is_active: false
+    }, req);
 
     res.json({ success: true, message: 'User deactivated successfully' });
   } catch (error) {
@@ -582,6 +710,13 @@ const bulkDeleteUsers = async (req, res) => {
       user_ids
     );
 
+    // Log audit
+    await logAudit(req.user.id, 'BULK_DELETE', 'user', null, {
+      action: 'bulk_delete',
+      user_ids,
+      count: result.affectedRows
+    }, req);
+
     res.json({
       success: true,
       count: result.affectedRows,
@@ -590,6 +725,55 @@ const bulkDeleteUsers = async (req, res) => {
   } catch (error) {
     console.error('Bulk delete users error:', error);
     res.status(500).json({ success: false, error: 'Failed to bulk delete users' });
+  }
+};
+
+/**
+ * @route   PATCH /api/users/bulk-status
+ * @desc    Bulk update user status (activate/deactivate multiple users)
+ * @access  Private (Admin)
+ */
+const bulkUpdateStatus = async (req, res) => {
+  try {
+    const { user_ids, is_active } = req.body;
+
+    if (!user_ids || !Array.isArray(user_ids) || user_ids.length === 0) {
+      return res.status(400).json({ success: false, error: 'User IDs array required' });
+    }
+
+    if (typeof is_active !== 'boolean') {
+      return res.status(400).json({ success: false, error: 'is_active must be a boolean' });
+    }
+
+    // Don't allow deactivating self
+    if (!is_active && user_ids.includes(req.user.id)) {
+      return res.status(400).json({ success: false, error: 'Cannot deactivate yourself' });
+    }
+
+    // Update user status
+    const placeholders = user_ids.map(() => '?').join(',');
+    const [result] = await pool.query(
+      `UPDATE users SET is_active = ? WHERE id IN (${placeholders})`,
+      [is_active, ...user_ids]
+    );
+
+    // Log audit
+    const action = is_active ? 'activated' : 'deactivated';
+    await logAudit(req.user.id, 'BULK_STATUS_UPDATE', 'user', null, {
+      action: `bulk_${action}`,
+      user_ids,
+      is_active,
+      count: result.affectedRows
+    }, req);
+
+    res.json({
+      success: true,
+      count: result.affectedRows,
+      message: `${result.affectedRows} user(s) ${action} successfully`
+    });
+  } catch (error) {
+    console.error('Bulk update status error:', error);
+    res.status(500).json({ success: false, error: 'Failed to bulk update status' });
   }
 };
 
@@ -686,5 +870,6 @@ module.exports = {
   assignRegion,
   unassignRegion,
   bulkDeleteUsers,
+  bulkUpdateStatus,
   bulkAssignRegions
 };

@@ -1,4 +1,5 @@
 const { pool } = require('../config/database');
+const { logAudit } = require('./auditController');
 
 /**
  * @route   GET /api/rf/sectors
@@ -7,20 +8,55 @@ const { pool } = require('../config/database');
  */
 const getAllSectors = async (req, res) => {
   try {
-    const userId = req.user.id;
-    const { regionId } = req.query;
+    const currentUserId = req.user.id;
+const currentUserRole = (req.user.role || '').toLowerCase();
+    const { regionId, filter, userId: filterUserId } = req.query;
 
-    let query = 'SELECT * FROM sector_rf_data WHERE user_id = ?';
-    const params = [userId];
+    console.log('📡 RF sectors request:', {
+      currentUserId,
+      currentUserRole,
+      filter,
+      filterUserId
+    });
+
+    // Base query with username join
+    let query = `
+      SELECT sr.*, u.username as username
+      FROM sector_rf_data sr
+      LEFT JOIN users u ON sr.user_id = u.id
+    `;
+    let params = [];
+    let whereConditions = [];
+
+    // Apply filtering logic
+if (filter === 'all' && (currentUserRole === 'admin' || currentUserRole === 'manager')) {
+      console.log('📡 Admin/Manager viewing ALL users data');
+} else if (filter === 'user' && (currentUserRole === 'admin' || currentUserRole === 'manager') && filterUserId) {
+      whereConditions.push('sr.user_id = ?');
+      params.push(parseInt(filterUserId));
+      console.log('📡 Admin/Manager viewing user', filterUserId);
+    } else {
+      whereConditions.push('sr.user_id = ?');
+      params.push(currentUserId);
+      console.log('📡 User viewing own data only');
+    }
 
     if (regionId) {
-      query += ' AND region_id = ?';
+      whereConditions.push('sr.region_id = ?');
       params.push(regionId);
     }
 
-    query += ' ORDER BY created_at DESC';
+    if (whereConditions.length > 0) {
+      query += ' WHERE ' + whereConditions.join(' AND ');
+    }
+    query += ' ORDER BY sr.created_at DESC';
+
+    console.log('📡 Final query:', query);
+    console.log('📡 Query params:', params);
 
     const [sectors] = await pool.query(query, params);
+
+    console.log('📡 Found sectors:', sectors.length);
 
     res.json({ success: true, sectors });
   } catch (error) {
@@ -118,6 +154,15 @@ const createSector = async (req, res) => {
       ]
     );
 
+    // Log audit
+    await logAudit(userId, 'CREATE', 'sector_rf', result.insertId, {
+      sector_name,
+      azimuth,
+      beamwidth: beamwidth || 65,
+      radius: radius || 1000,
+      frequency
+    }, req);
+
     res.status(201).json({
       success: true,
       sector: {
@@ -212,6 +257,11 @@ const updateSector = async (req, res) => {
       params
     );
 
+    // Log audit
+    await logAudit(userId, 'UPDATE', 'sector_rf', id, {
+      updated_fields: { sector_name, frequency, power, antenna_height, antenna_type, fill_color, stroke_color, opacity, notes, is_saved }
+    }, req);
+
     res.json({ success: true, message: 'Sector updated successfully' });
   } catch (error) {
     console.error('Update sector error:', error);
@@ -229,7 +279,22 @@ const deleteSector = async (req, res) => {
     const { id } = req.params;
     const userId = req.user.id;
 
+    // Get sector details before deletion for audit log
+    const [sectors] = await pool.query(
+      'SELECT sector_name, azimuth, frequency FROM sector_rf_data WHERE id = ? AND user_id = ?',
+      [id, userId]
+    );
+
     await pool.query('DELETE FROM sector_rf_data WHERE id = ? AND user_id = ?', [id, userId]);
+
+    // Log audit
+    if (sectors.length > 0) {
+      await logAudit(userId, 'DELETE', 'sector_rf', id, {
+        sector_name: sectors[0].sector_name,
+        azimuth: sectors[0].azimuth,
+        frequency: sectors[0].frequency
+      }, req);
+    }
 
     res.json({ success: true, message: 'Sector deleted successfully' });
   } catch (error) {
