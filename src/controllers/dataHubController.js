@@ -28,9 +28,17 @@ const getAllData = async (req, res) => {
       whereParams = [];
       console.log('📊 Admin/Manager viewing ALL users data');
     } else if (filter === 'user' && (currentUserRole === 'admin' || currentUserRole === 'manager') && filterUserId) {
-      whereCondition = 'WHERE user_id = ?';
-      whereParams = [parseInt(filterUserId)];
-      console.log('📊 Admin/Manager viewing user', filterUserId);
+      const parsedUserId = parseInt(filterUserId);
+      if (!isNaN(parsedUserId) && parsedUserId > 0) {
+        whereCondition = 'WHERE user_id = ?';
+        whereParams = [parsedUserId];
+        console.log('📊 Admin/Manager viewing user', parsedUserId);
+      } else {
+        console.log('⚠️ Invalid userId filter, defaulting to current user');
+        // Invalid userId, default to current user
+        whereCondition = 'WHERE user_id = ?';
+        whereParams = [currentUserId];
+      }
     }
 
     // Fetch all measurement types with username

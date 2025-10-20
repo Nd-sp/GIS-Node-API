@@ -13,7 +13,8 @@ const {
   unassignRegion,
   bulkDeleteUsers,
   bulkUpdateStatus,
-  bulkAssignRegions
+  bulkAssignRegions,
+  resetPassword
 } = require('../controllers/userController');
 const { authenticate, authorize } = require('../middleware/auth');
 
@@ -49,6 +50,9 @@ router.patch('/:id/activate', authorize('admin'), activateUser);
 
 // PATCH /api/users/:id/deactivate - Deactivate user
 router.patch('/:id/deactivate', authorize('admin'), deactivateUser);
+
+// POST /api/users/:id/reset-password - Reset user password
+router.post('/:id/reset-password', authorize('admin', 'manager'), resetPassword);
 
 // GET /api/users/:id/regions - Get user regions
 router.get('/:id/regions', getUserRegions);

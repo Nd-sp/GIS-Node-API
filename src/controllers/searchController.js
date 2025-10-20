@@ -192,6 +192,189 @@ const searchFeatures = async (req, res) => {
 };
 
 /**
+ * @route   GET /api/search/saved-data
+ * @desc    Search saved GIS data (admin can search by user)
+ * @access  Private
+ */
+const searchSavedData = async (req, res) => {
+  try {
+    const currentUserId = req.user.id;
+    const currentUserRole = req.user.role;
+    const { q, userId: targetUserId } = req.query;
+
+    if (!q || q.trim().length < 2) {
+      return res.status(400).json({
+        success: false,
+        error: 'Search query must be at least 2 characters'
+      });
+    }
+
+    const searchTerm = `%${q}%`;
+
+    // Determine which user's data to search
+    let searchUserId = currentUserId;
+
+    // Admin and manager can search other users' data
+    if ((currentUserRole === 'admin' || currentUserRole === 'manager') && targetUserId) {
+      searchUserId = parseInt(targetUserId);
+    }
+
+    const results = {
+      infrastructure: [],
+      measurements: [],
+      polygons: [],
+      circles: [],
+      elevations: [],
+      sectors: []
+    };
+
+    // Search Infrastructure
+    try {
+      const [infrastructure] = await pool.query(
+        `SELECT id, item_name as name, item_type as type, latitude, longitude,
+                address_street, address_city, address_state, address_pincode, notes, created_at, user_id
+         FROM infrastructure_items
+         WHERE user_id = ? AND (item_name LIKE ? OR notes LIKE ?)
+         ORDER BY created_at DESC
+         LIMIT 20`,
+        [searchUserId, searchTerm, searchTerm]
+      );
+      results.infrastructure = infrastructure;
+    } catch (error) {
+      console.error('❌ Error searching infrastructure:', error.message);
+      results.infrastructure = [];
+    }
+
+    // Search Distance Measurements
+    const [measurements] = await pool.query(
+      `SELECT id, measurement_name as name, total_distance, points, created_at, user_id
+       FROM distance_measurements
+       WHERE user_id = ? AND measurement_name LIKE ?
+       ORDER BY created_at DESC
+       LIMIT 20`,
+      [searchUserId, searchTerm]
+    );
+    // Parse JSON points field
+    results.measurements = measurements.map(m => ({
+      ...m,
+      points: typeof m.points === 'string' ? JSON.parse(m.points) : (m.points || [])
+    }));
+
+    // Search Polygon Drawings
+    const [polygons] = await pool.query(
+      `SELECT id, polygon_name as name, vertices, area, perimeter,
+              stroke_color, fill_color, opacity, created_at, user_id
+       FROM polygon_drawings
+       WHERE user_id = ? AND polygon_name LIKE ?
+       ORDER BY created_at DESC
+       LIMIT 20`,
+      [searchUserId, searchTerm]
+    );
+    // Parse JSON vertices field and add as coordinates
+    results.polygons = polygons.map(p => ({
+      ...p,
+      vertices: typeof p.vertices === 'string' ? JSON.parse(p.vertices) : (p.vertices || []),
+      coordinates: typeof p.vertices === 'string' ? JSON.parse(p.vertices) : (p.vertices || [])
+    }));
+
+    // Search Circle Drawings
+    const [circles] = await pool.query(
+      `SELECT id, circle_name as name, center_lat, center_lng, radius, area,
+              stroke_color, fill_color, opacity, created_at, user_id
+       FROM circle_drawings
+       WHERE user_id = ? AND circle_name LIKE ?
+       ORDER BY created_at DESC
+       LIMIT 20`,
+      [searchUserId, searchTerm]
+    );
+    // Construct center object from lat/lng fields
+    results.circles = circles.map(c => ({
+      ...c,
+      center: c.center_lat && c.center_lng ? { lat: c.center_lat, lng: c.center_lng } : null
+    }));
+
+    // Search Elevation Profiles
+    const [elevations] = await pool.query(
+      `SELECT id, profile_name as name, points, max_elevation, min_elevation, created_at, user_id
+       FROM elevation_profiles
+       WHERE user_id = ? AND profile_name LIKE ?
+       ORDER BY created_at DESC
+       LIMIT 20`,
+      [searchUserId, searchTerm]
+    );
+    // Parse JSON points field
+    results.elevations = elevations.map(e => ({
+      ...e,
+      points: typeof e.points === 'string' ? JSON.parse(e.points) : (e.points || [])
+    }));
+
+    // Search RF Sectors
+    const [sectors] = await pool.query(
+      `SELECT id, sector_name as name, tower_lat, tower_lng, radius, start_angle, end_angle,
+              stroke_color, fill_color, opacity, azimuth, beamwidth, created_at, user_id
+       FROM sector_rf_data
+       WHERE user_id = ? AND sector_name LIKE ?
+       ORDER BY created_at DESC
+       LIMIT 20`,
+      [searchUserId, searchTerm]
+    );
+    // Construct center object from tower lat/lng fields
+    results.sectors = sectors.map(s => ({
+      ...s,
+      center: s.tower_lat && s.tower_lng ? { lat: s.tower_lat, lng: s.tower_lng } : null
+    }));
+
+    // Get user info if admin/manager searching another user's data
+    let userInfo = null;
+    if ((currentUserRole === 'admin' || currentUserRole === 'manager') && searchUserId !== currentUserId) {
+      const [users] = await pool.query(
+        'SELECT id, username, full_name, email FROM users WHERE id = ?',
+        [searchUserId]
+      );
+      userInfo = users[0] || null;
+    }
+
+    res.json({
+      success: true,
+      results,
+      searchedUser: userInfo,
+      totalResults: Object.values(results).reduce((sum, arr) => sum + arr.length, 0)
+    });
+  } catch (error) {
+    console.error('Search saved data error:', error);
+    res.status(500).json({ success: false, error: 'Failed to search saved data' });
+  }
+};
+
+/**
+ * @route   GET /api/search/users-list
+ * @desc    Get list of users for admin/manager to filter search
+ * @access  Private (Admin/Manager)
+ */
+const getUsersList = async (req, res) => {
+  try {
+    if (req.user.role !== 'admin' && req.user.role !== 'manager') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied. Admin or Manager only.'
+      });
+    }
+
+    const [users] = await pool.query(
+      `SELECT id, username, full_name, email, role
+       FROM users
+       WHERE is_active = true
+       ORDER BY full_name, username`
+    );
+
+    res.json({ success: true, users });
+  } catch (error) {
+    console.error('Get users list error:', error);
+    res.status(500).json({ success: false, error: 'Failed to get users list' });
+  }
+};
+
+/**
  * @route   GET /api/search/history
  * @desc    Get user's search history
  * @access  Private
@@ -241,6 +424,8 @@ module.exports = {
   searchUsers,
   searchRegions,
   searchFeatures,
+  searchSavedData,
+  getUsersList,
   getSearchHistory,
   deleteSearchHistory
 };

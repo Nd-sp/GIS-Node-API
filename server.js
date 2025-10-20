@@ -8,6 +8,7 @@ require("dotenv").config();
 const { testConnection } = require("./src/config/database");
 const { errorHandler, notFound } = require("./src/middleware/errorHandler");
 const { startCleanupScheduler } = require("./src/utils/temporaryAccessCleanup");
+const { ensureTables } = require("./src/config/initTables");
 
 // Initialize Express app
 const app = express();
@@ -35,6 +36,10 @@ if (process.env.NODE_ENV === "development") {
   app.use(morgan("dev"));
 }
 
+// Performance tracking middleware
+const { performanceMiddleware } = require("./src/middleware/performanceTracking");
+app.use(performanceMiddleware);
+
 // Rate limiting - Industry standard (more permissive for development)
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 60000, // 1 minute (reduced window)
@@ -52,7 +57,9 @@ const limiter = rateLimit({
       '/measurements/',
       '/drawings/',
       '/rf/',
-      '/elevation'
+      '/elevation',
+      '/infrastructure/',
+      '/analytics/'
     ];
     return skipPaths.some(path => req.path.includes(path));
   }
@@ -71,13 +78,40 @@ app.get("/", (req, res) => {
 });
 
 // API health check
-app.get("/api/health", (req, res) => {
-  res.json({
-    success: true,
-    status: "healthy",
-    database: "connected",
-    timestamp: new Date().toISOString()
-  });
+app.get("/api/health", async (req, res) => {
+  try {
+    const { pool } = require("./src/config/database");
+
+    // Test database connection
+    let dbStatus = "connected";
+    try {
+      await pool.query('SELECT 1');
+    } catch (err) {
+      dbStatus = "disconnected";
+    }
+
+    res.json({
+      success: true,
+      status: "healthy",
+      server: {
+        name: "OptiConnectGIS Backend",
+        version: "1.0.0",
+        environment: process.env.NODE_ENV || "development",
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString()
+      },
+      database: {
+        status: dbStatus,
+        name: process.env.DB_NAME || "opticonnectgis_db"
+      }
+    });
+  } catch (error) {
+    res.status(503).json({
+      success: false,
+      status: "unhealthy",
+      error: error.message
+    });
+  }
 });
 
 // Import and use routes
@@ -196,6 +230,9 @@ const startServer = async () => {
       );
       process.exit(1);
     }
+
+    // Ensure all database tables exist
+    await ensureTables();
 
     // Start temporary access cleanup scheduler
     startCleanupScheduler();

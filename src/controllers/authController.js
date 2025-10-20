@@ -22,6 +22,7 @@ const login = async (req, res) => {
 
     // Find user by email, username, or user ID
     // Try to match against email, username, or id (if numeric)
+    // Join with users table to get creator's name
     let query;
     let params;
 
@@ -30,11 +31,17 @@ const login = async (req, res) => {
 
     if (isNumeric) {
       // Search by ID, username, or email
-      query = 'SELECT * FROM users WHERE id = ? OR username = ? OR email = ?';
+      query = `SELECT u.*, creator.full_name as created_by_name
+               FROM users u
+               LEFT JOIN users creator ON u.created_by = creator.id
+               WHERE u.id = ? OR u.username = ? OR u.email = ?`;
       params = [parseInt(email), email, email];
     } else {
       // Search by email or username
-      query = 'SELECT * FROM users WHERE email = ? OR username = ?';
+      query = `SELECT u.*, creator.full_name as created_by_name
+               FROM users u
+               LEFT JOIN users creator ON u.created_by = creator.id
+               WHERE u.email = ? OR u.username = ?`;
       params = [email, email];
     }
 
@@ -113,17 +120,34 @@ const login = async (req, res) => {
         id: user.id,
         username: user.username,
         email: user.email,
+        name: user.full_name,  // Add 'name' for frontend compatibility
         full_name: user.full_name,
         role: user.role,
         phone: user.phone,
+        phoneNumber: user.phone,  // Add phoneNumber for compatibility
         department: user.department,
+        officeLocation: user.office_location,
         office_location: user.office_location,
         gender: user.gender,
         street: user.street,
         city: user.city,
         state: user.state,
         pincode: user.pincode,
+        address: {  // Also provide nested address object for compatibility
+          street: user.street,
+          city: user.city,
+          state: user.state,
+          pincode: user.pincode
+        },
         assignedRegions: assignedRegions,  // Array of region names
+        status: user.is_active ? 'Active' : 'Inactive',
+        isActive: user.is_active,
+        isEmailVerified: user.is_email_verified,
+        createdBy: user.created_by,
+        createdByName: user.created_by_name,
+        createdAt: user.created_at,
+        updatedAt: user.updated_at,
+        lastLogin: user.last_login,
         last_login: user.last_login
       }
     });
@@ -232,9 +256,13 @@ const getCurrentUser = async (req, res) => {
     const userId = req.user.id;
 
     const [users] = await pool.query(
-      `SELECT id, username, email, full_name, role, phone, department,
-              is_active, is_email_verified, last_login, created_at
-       FROM users WHERE id = ?`,
+      `SELECT u.id, u.username, u.email, u.full_name, u.role, u.phone, u.department,
+              u.office_location, u.gender, u.street, u.city, u.state, u.pincode,
+              u.is_active, u.is_email_verified, u.last_login, u.created_at, u.updated_at,
+              u.created_by, creator.full_name as created_by_name
+       FROM users u
+       LEFT JOIN users creator ON u.created_by = creator.id
+       WHERE u.id = ?`,
       [userId]
     );
 
@@ -255,11 +283,48 @@ const getCurrentUser = async (req, res) => {
     );
 
     const user = users[0];
-    user.regions = regions;
+    const assignedRegions = regions.map(r => r.name);
+
+    // Format user data for frontend consistency
+    const formattedUser = {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      name: user.full_name,
+      full_name: user.full_name,
+      role: user.role,
+      phone: user.phone,
+      phoneNumber: user.phone,
+      department: user.department,
+      officeLocation: user.office_location,
+      office_location: user.office_location,
+      gender: user.gender,
+      street: user.street,
+      city: user.city,
+      state: user.state,
+      pincode: user.pincode,
+      address: {
+        street: user.street,
+        city: user.city,
+        state: user.state,
+        pincode: user.pincode
+      },
+      assignedRegions: assignedRegions,
+      status: user.is_active ? 'Active' : 'Inactive',
+      isActive: user.is_active,
+      isEmailVerified: user.is_email_verified,
+      createdBy: user.created_by,
+      createdByName: user.created_by_name,
+      createdAt: user.created_at,
+      updatedAt: user.updated_at,
+      lastLogin: user.last_login,
+      last_login: user.last_login,
+      regions: regions
+    };
 
     res.json({
       success: true,
-      user
+      user: formattedUser
     });
 
   } catch (error) {
