@@ -340,11 +340,174 @@ const downloadExport = async (req, res) => {
   }
 };
 
+/**
+ * @route   DELETE /api/datahub/delete/:type/:id
+ * @desc    Delete single data item (Admin can delete any, users can delete their own)
+ * @access  Private
+ */
+const deleteSingleData = async (req, res) => {
+  try {
+    const { type, id } = req.params;
+    const currentUserId = req.user.id;
+    const currentUserRole = (req.user.role || '').toLowerCase();
+
+    console.log('🗑️ Delete single data request:', {
+      currentUserId,
+      currentUserRole,
+      type,
+      id
+    });
+
+    // Map type to table name
+    const tableMap = {
+      'distance': 'distance_measurements',
+      'polygon': 'polygon_drawings',
+      'circle': 'circle_drawings',
+      'sector': 'sector_rf_data',
+      'elevation': 'elevation_profiles',
+      'infrastructure': 'infrastructure_items'
+    };
+
+    const tableName = tableMap[type];
+    if (!tableName) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid data type'
+      });
+    }
+
+    // Check if item exists and get owner
+    const [items] = await pool.query(
+      `SELECT user_id FROM ${tableName} WHERE id = ?`,
+      [id]
+    );
+
+    if (items.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Item not found'
+      });
+    }
+
+    const itemUserId = items[0].user_id;
+
+    // Authorization check: Admin can delete any, users can only delete their own
+    if (currentUserRole !== 'admin' && itemUserId !== currentUserId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Permission denied. You can only delete your own data.'
+      });
+    }
+
+    // Delete the item
+    await pool.query(
+      `DELETE FROM ${tableName} WHERE id = ?`,
+      [id]
+    );
+
+    console.log('✅ Successfully deleted:', { type, id, tableName });
+
+    res.json({
+      success: true,
+      message: 'Data deleted successfully'
+    });
+  } catch (error) {
+    console.error('Delete single data error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete data'
+    });
+  }
+};
+
+/**
+ * @route   DELETE /api/datahub/delete-bulk/:type
+ * @desc    Bulk delete data by category (Admin only or user's own data)
+ * @access  Private
+ */
+const deleteBulkData = async (req, res) => {
+  try {
+    const { type } = req.params;
+    const { userId } = req.body; // Optional: specific user's data to delete
+    const currentUserId = req.user.id;
+    const currentUserRole = (req.user.role || '').toLowerCase();
+
+    console.log('🗑️ Bulk delete request:', {
+      currentUserId,
+      currentUserRole,
+      type,
+      targetUserId: userId
+    });
+
+    // Map type to table name
+    const tableMap = {
+      'distance': 'distance_measurements',
+      'polygon': 'polygon_drawings',
+      'circle': 'circle_drawings',
+      'sector': 'sector_rf_data',
+      'elevation': 'elevation_profiles',
+      'infrastructure': 'infrastructure_items'
+    };
+
+    const tableName = tableMap[type];
+    if (!tableName) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid data type'
+      });
+    }
+
+    let whereCondition = 'WHERE user_id = ?';
+    let whereParams = [];
+
+    if (userId && currentUserRole === 'admin') {
+      // Admin deleting specific user's data
+      whereParams = [userId];
+    } else if (currentUserRole === 'admin' && !userId) {
+      // Admin deleting all data in category
+      whereCondition = '';
+      whereParams = [];
+    } else {
+      // Regular user deleting their own data
+      whereParams = [currentUserId];
+    }
+
+    // Get count before deletion
+    const countQuery = `SELECT COUNT(*) as count FROM ${tableName} ${whereCondition}`;
+    const [countResult] = await pool.query(countQuery, whereParams);
+    const deletedCount = countResult[0].count;
+
+    // Delete the items
+    const deleteQuery = `DELETE FROM ${tableName} ${whereCondition}`;
+    await pool.query(deleteQuery, whereParams);
+
+    console.log('✅ Bulk delete successful:', {
+      type,
+      tableName,
+      deletedCount
+    });
+
+    res.json({
+      success: true,
+      message: `Successfully deleted ${deletedCount} ${type} record(s)`,
+      deletedCount
+    });
+  } catch (error) {
+    console.error('Bulk delete error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to bulk delete data'
+    });
+  }
+};
+
 module.exports = {
   getAllData,
   importData,
   getImportHistory,
   exportData,
   getExportHistory,
-  downloadExport
+  downloadExport,
+  deleteSingleData,
+  deleteBulkData
 };

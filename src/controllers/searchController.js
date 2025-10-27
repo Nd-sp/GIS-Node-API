@@ -295,18 +295,17 @@ const searchSavedData = async (req, res) => {
 
     // Search Elevation Profiles
     const [elevations] = await pool.query(
-      `SELECT id, profile_name as name, points, max_elevation, min_elevation, created_at, user_id
+      `SELECT id, profile_name as name, start_point, end_point, elevation_data,
+              total_distance, min_elevation, max_elevation, elevation_gain,
+              elevation_loss, notes, created_at, user_id
        FROM elevation_profiles
        WHERE user_id = ? AND profile_name LIKE ?
        ORDER BY created_at DESC
        LIMIT 20`,
       [searchUserId, searchTerm]
     );
-    // Parse JSON points field
-    results.elevations = elevations.map(e => ({
-      ...e,
-      points: typeof e.points === 'string' ? JSON.parse(e.points) : (e.points || [])
-    }));
+    // No need to parse JSON fields here - they will be parsed on the frontend
+    results.elevations = elevations;
 
     // Search RF Sectors
     const [sectors] = await pool.query(

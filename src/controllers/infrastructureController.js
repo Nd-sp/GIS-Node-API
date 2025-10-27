@@ -1,14 +1,25 @@
-const { pool } = require('../config/database');
-const { parseStringPromise } = require('xml2js');
-const { v4: uuidv4 } = require('uuid');
+const { pool } = require("../config/database");
+const { parseStringPromise } = require("xml2js");
+const { v4: uuidv4 } = require("uuid");
 
 /**
  * Helper: Log audit trail
  */
-const logAudit = async (infrastructureId, userId, action, oldValues, newValues, req) => {
+const logAudit = async (
+  infrastructureId,
+  userId,
+  action,
+  oldValues,
+  newValues,
+  req
+) => {
   try {
-    const ipAddress = req?.ip || req?.headers?.['x-forwarded-for'] || req?.connection?.remoteAddress || null;
-    const userAgent = req?.headers?.['user-agent'] || null;
+    const ipAddress =
+      req?.ip ||
+      req?.headers?.["x-forwarded-for"] ||
+      req?.connection?.remoteAddress ||
+      null;
+    const userAgent = req?.headers?.["user-agent"] || null;
 
     await pool.query(
       `INSERT INTO infrastructure_audit
@@ -25,7 +36,7 @@ const logAudit = async (infrastructureId, userId, action, oldValues, newValues, 
       ]
     );
   } catch (error) {
-    console.error('Audit logging error:', error);
+    console.error("Audit logging error:", error);
     // Don't fail the main operation if audit fails
   }
 };
@@ -41,9 +52,27 @@ const detectRegionFromCoordinates = async (lat, lng) => {
 
     // Example: Gujarat boundaries (simplified)
     const regionMappings = [
-      { name: 'Gujarat', latMin: 20.0, latMax: 24.7, lngMin: 68.0, lngMax: 74.5 },
-      { name: 'Maharashtra', latMin: 15.6, latMax: 22.0, lngMin: 72.6, lngMax: 80.9 },
-      { name: 'Rajasthan', latMin: 23.0, latMax: 30.2, lngMin: 69.5, lngMax: 78.3 },
+      {
+        name: "Gujarat",
+        latMin: 20.0,
+        latMax: 24.7,
+        lngMin: 68.0,
+        lngMax: 74.5
+      },
+      {
+        name: "Maharashtra",
+        latMin: 15.6,
+        latMax: 22.0,
+        lngMin: 72.6,
+        lngMax: 80.9
+      },
+      {
+        name: "Rajasthan",
+        latMin: 23.0,
+        latMax: 30.2,
+        lngMin: 69.5,
+        lngMax: 78.3
+      }
       // Add more regions as needed
     ];
 
@@ -55,7 +84,7 @@ const detectRegionFromCoordinates = async (lat, lng) => {
         lng <= region.lngMax
       ) {
         const [regions] = await pool.query(
-          'SELECT id FROM regions WHERE name = ? AND is_active = TRUE LIMIT 1',
+          "SELECT id FROM regions WHERE name = ? AND is_active = TRUE LIMIT 1",
           [region.name]
         );
         if (regions.length > 0) {
@@ -66,7 +95,7 @@ const detectRegionFromCoordinates = async (lat, lng) => {
 
     return null;
   } catch (error) {
-    console.error('Error detecting region:', error);
+    console.error("Error detecting region:", error);
     return null;
   }
 };
@@ -74,9 +103,14 @@ const detectRegionFromCoordinates = async (lat, lng) => {
 /**
  * Helper: Check user access to infrastructure
  */
-const canAccessInfrastructure = async (userId, userRole, infraUserId, regionId) => {
+const canAccessInfrastructure = async (
+  userId,
+  userRole,
+  infraUserId,
+  regionId
+) => {
   // Admin and manager can access all infrastructure
-  if (userRole === 'admin' || userRole === 'manager') {
+  if (userRole === "admin" || userRole === "manager") {
     return true;
   }
 
@@ -113,10 +147,18 @@ const canAccessInfrastructure = async (userId, userRole, infraUserId, regionId) 
 const getAllInfrastructure = async (req, res) => {
   try {
     const userId = req.user.id;
-    const userRole = (req.user.role || '').toLowerCase();
-    const { regionId, item_type, status, source, search, filter, userId: filterUserId } = req.query;
+    const userRole = (req.user.role || "").toLowerCase();
+    const {
+      regionId,
+      item_type,
+      status,
+      source,
+      search,
+      filter,
+      userId: filterUserId
+    } = req.query;
 
-    console.log('🏗️ Infrastructure getAllInfrastructure request:', {
+    console.log("🏗️ Infrastructure getAllInfrastructure request:", {
       userId,
       userRole,
       filter,
@@ -136,27 +178,31 @@ const getAllInfrastructure = async (req, res) => {
     const params = [];
 
     // Role-based filtering with explicit filter parameter support
-    if (filter === 'all' && (userRole === 'admin' || userRole === 'manager')) {
+    if (filter === "all" && (userRole === "admin" || userRole === "manager")) {
       // Admin/Manager viewing ALL users' data
-      console.log('🏗️ Admin/Manager viewing ALL infrastructure data');
-    } else if (filter === 'user' && (userRole === 'admin' || userRole === 'manager') && filterUserId) {
+      console.log("🏗️ Admin/Manager viewing ALL infrastructure data");
+    } else if (
+      filter === "user" &&
+      (userRole === "admin" || userRole === "manager") &&
+      filterUserId
+    ) {
       // Admin/Manager viewing specific user's data
       const parsedUserId = parseInt(filterUserId);
       if (!isNaN(parsedUserId) && parsedUserId > 0) {
-        query += ' AND i.user_id = ?';
+        query += " AND i.user_id = ?";
         params.push(parsedUserId);
-        console.log('🏗️ Admin/Manager viewing user', parsedUserId);
+        console.log("🏗️ Admin/Manager viewing user", parsedUserId);
       } else {
-        console.log('⚠️ Invalid userId filter, defaulting to current user');
-        query += ' AND i.user_id = ?';
+        console.log("⚠️ Invalid userId filter, defaulting to current user");
+        query += " AND i.user_id = ?";
         params.push(userId);
       }
     } else {
       // Default: Users see only their own data
       // Regular users or no specific filter
-      if (userRole === 'admin' || userRole === 'manager') {
+      if (userRole === "admin" || userRole === "manager") {
         // Admin/Manager without filter sees all data
-        console.log('🏗️ Admin/Manager viewing all data (no filter specified)');
+        console.log("🏗️ Admin/Manager viewing all data (no filter specified)");
       } else {
         // Regular users see only:
         // 1. Their own data
@@ -173,25 +219,25 @@ const getAllInfrastructure = async (req, res) => {
           )
         )`;
         params.push(userId, userId, userId);
-        console.log('🏗️ Regular user viewing own data');
+        console.log("🏗️ Regular user viewing own data");
       }
     }
 
     // Additional filters
     if (regionId) {
-      query += ' AND i.region_id = ?';
+      query += " AND i.region_id = ?";
       params.push(regionId);
     }
     if (item_type) {
-      query += ' AND i.item_type = ?';
+      query += " AND i.item_type = ?";
       params.push(item_type);
     }
     if (status) {
-      query += ' AND i.status = ?';
+      query += " AND i.status = ?";
       params.push(status);
     }
     if (source) {
-      query += ' AND i.source = ?';
+      query += " AND i.source = ?";
       params.push(source);
     }
     if (search) {
@@ -206,23 +252,25 @@ const getAllInfrastructure = async (req, res) => {
       params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
     }
 
-    query += ' ORDER BY i.created_at DESC';
+    query += " ORDER BY i.created_at DESC";
 
     const [items] = await pool.query(query, params);
 
-    console.log('🏗️ Infrastructure getAllInfrastructure response:', {
+    console.log("🏗️ Infrastructure getAllInfrastructure response:", {
       count: items.length,
       sampleItem: items[0] || null
     });
 
     res.json({
       success: true,
-      items: items,  // Changed from 'data' to 'items' to match frontend expectation
+      items: items, // Changed from 'data' to 'items' to match frontend expectation
       count: items.length
     });
   } catch (error) {
-    console.error('Get infrastructure error:', error);
-    res.status(500).json({ success: false, error: 'Failed to get infrastructure items' });
+    console.error("Get infrastructure error:", error);
+    res
+      .status(500)
+      .json({ success: false, error: "Failed to get infrastructure items" });
   }
 };
 
@@ -250,21 +298,30 @@ const getInfrastructureById = async (req, res) => {
     );
 
     if (items.length === 0) {
-      return res.status(404).json({ success: false, error: 'Infrastructure item not found' });
+      return res
+        .status(404)
+        .json({ success: false, error: "Infrastructure item not found" });
     }
 
     const item = items[0];
 
     // Check access
-    const hasAccess = await canAccessInfrastructure(userId, userRole, item.user_id, item.region_id);
+    const hasAccess = await canAccessInfrastructure(
+      userId,
+      userRole,
+      item.user_id,
+      item.region_id
+    );
     if (!hasAccess) {
-      return res.status(403).json({ success: false, error: 'Access denied' });
+      return res.status(403).json({ success: false, error: "Access denied" });
     }
 
     res.json({ success: true, data: item });
   } catch (error) {
-    console.error('Get infrastructure item error:', error);
-    res.status(500).json({ success: false, error: 'Failed to get infrastructure item' });
+    console.error("Get infrastructure item error:", error);
+    res
+      .status(500)
+      .json({ success: false, error: "Failed to get infrastructure item" });
   }
 };
 
@@ -321,7 +378,8 @@ const createInfrastructure = async (req, res) => {
     if (!item_type || !item_name || !unique_id || !latitude || !longitude) {
       return res.status(400).json({
         success: false,
-        error: 'Required fields: item_type, item_name, unique_id, latitude, longitude'
+        error:
+          "Required fields: item_type, item_name, unique_id, latitude, longitude"
       });
     }
 
@@ -368,18 +426,18 @@ const createInfrastructure = async (req, res) => {
         landlord_contact,
         nature_of_business,
         owner,
-        structure_type || 'Tower',
+        structure_type || "Tower",
         ups_availability || false,
         ups_capacity,
         backup_capacity,
-        power_source || 'Grid',
+        power_source || "Grid",
         equipment_list ? JSON.stringify(equipment_list) : null,
         connected_to ? JSON.stringify(connected_to) : null,
         bandwidth,
-        status || 'Active',
+        status || "Active",
         installation_date,
         maintenance_due_date,
-        source || 'Manual',
+        source || "Manual",
         notes,
         properties ? JSON.stringify(properties) : null,
         capacity ? JSON.stringify(capacity) : null,
@@ -388,14 +446,21 @@ const createInfrastructure = async (req, res) => {
     );
 
     // Log audit
-    await logAudit(result.insertId, userId, 'CREATE', null, {
-      item_type,
-      item_name,
-      unique_id,
-      latitude,
-      longitude,
-      status: status || 'Active'
-    }, req);
+    await logAudit(
+      result.insertId,
+      userId,
+      "CREATE",
+      null,
+      {
+        item_type,
+        item_name,
+        unique_id,
+        latitude,
+        longitude,
+        status: status || "Active"
+      },
+      req
+    );
 
     res.status(201).json({
       success: true,
@@ -404,13 +469,15 @@ const createInfrastructure = async (req, res) => {
         item_type,
         item_name,
         unique_id,
-        status: status || 'Active',
+        status: status || "Active",
         region_id
       }
     });
   } catch (error) {
-    console.error('Create infrastructure error:', error);
-    res.status(500).json({ success: false, error: 'Failed to create infrastructure item' });
+    console.error("Create infrastructure error:", error);
+    res
+      .status(500)
+      .json({ success: false, error: "Failed to create infrastructure item" });
   }
 };
 
@@ -427,26 +494,60 @@ const updateInfrastructure = async (req, res) => {
     const updateFields = req.body;
 
     // Check if item exists and user has access
-    const [items] = await pool.query('SELECT * FROM infrastructure_items WHERE id = ?', [id]);
+    const [items] = await pool.query(
+      "SELECT * FROM infrastructure_items WHERE id = ?",
+      [id]
+    );
     if (items.length === 0) {
-      return res.status(404).json({ success: false, error: 'Infrastructure item not found' });
+      return res
+        .status(404)
+        .json({ success: false, error: "Infrastructure item not found" });
     }
 
     const item = items[0];
-    const hasAccess = await canAccessInfrastructure(userId, userRole, item.user_id, item.region_id);
+    const hasAccess = await canAccessInfrastructure(
+      userId,
+      userRole,
+      item.user_id,
+      item.region_id
+    );
     if (!hasAccess) {
-      return res.status(403).json({ success: false, error: 'Access denied' });
+      return res.status(403).json({ success: false, error: "Access denied" });
     }
 
     const allowedFields = [
-      'item_name', 'network_id', 'ref_code', 'height',
-      'address_street', 'address_city', 'address_state', 'address_pincode',
-      'contact_name', 'contact_phone', 'contact_email',
-      'is_rented', 'rent_amount', 'agreement_start_date', 'agreement_end_date',
-      'landlord_name', 'landlord_contact', 'nature_of_business', 'owner',
-      'structure_type', 'ups_availability', 'ups_capacity', 'backup_capacity', 'power_source',
-      'equipment_list', 'connected_to', 'bandwidth',
-      'status', 'installation_date', 'maintenance_due_date', 'notes', 'properties'
+      "item_name",
+      "network_id",
+      "ref_code",
+      "height",
+      "address_street",
+      "address_city",
+      "address_state",
+      "address_pincode",
+      "contact_name",
+      "contact_phone",
+      "contact_email",
+      "is_rented",
+      "rent_amount",
+      "agreement_start_date",
+      "agreement_end_date",
+      "landlord_name",
+      "landlord_contact",
+      "nature_of_business",
+      "owner",
+      "structure_type",
+      "ups_availability",
+      "ups_capacity",
+      "backup_capacity",
+      "power_source",
+      "equipment_list",
+      "connected_to",
+      "bandwidth",
+      "status",
+      "installation_date",
+      "maintenance_due_date",
+      "notes",
+      "properties"
     ];
 
     const updates = [];
@@ -456,8 +557,8 @@ const updateInfrastructure = async (req, res) => {
       if (allowedFields.includes(field)) {
         updates.push(`${field} = ?`);
         const value =
-          ['equipment_list', 'connected_to', 'properties'].includes(field) &&
-          typeof updateFields[field] === 'object'
+          ["equipment_list", "connected_to", "properties"].includes(field) &&
+          typeof updateFields[field] === "object"
             ? JSON.stringify(updateFields[field])
             : updateFields[field];
         params.push(value);
@@ -465,24 +566,31 @@ const updateInfrastructure = async (req, res) => {
     });
 
     if (updates.length === 0) {
-      return res.status(400).json({ success: false, error: 'No valid fields to update' });
+      return res
+        .status(400)
+        .json({ success: false, error: "No valid fields to update" });
     }
 
-    updates.push('updated_at = NOW()');
+    updates.push("updated_at = NOW()");
     params.push(id);
 
     await pool.query(
-      `UPDATE infrastructure_items SET ${updates.join(', ')} WHERE id = ?`,
+      `UPDATE infrastructure_items SET ${updates.join(", ")} WHERE id = ?`,
       params
     );
 
     // Log audit
-    await logAudit(id, userId, 'UPDATE', item, updateFields, req);
+    await logAudit(id, userId, "UPDATE", item, updateFields, req);
 
-    res.json({ success: true, message: 'Infrastructure item updated successfully' });
+    res.json({
+      success: true,
+      message: "Infrastructure item updated successfully"
+    });
   } catch (error) {
-    console.error('Update infrastructure error:', error);
-    res.status(500).json({ success: false, error: 'Failed to update infrastructure item' });
+    console.error("Update infrastructure error:", error);
+    res
+      .status(500)
+      .json({ success: false, error: "Failed to update infrastructure item" });
   }
 };
 
@@ -498,28 +606,42 @@ const deleteInfrastructure = async (req, res) => {
     const userRole = req.user.role;
 
     // Check if item exists and user has access
-    const [items] = await pool.query('SELECT * FROM infrastructure_items WHERE id = ?', [id]);
+    const [items] = await pool.query(
+      "SELECT * FROM infrastructure_items WHERE id = ?",
+      [id]
+    );
     if (items.length === 0) {
-      return res.status(404).json({ success: false, error: 'Infrastructure item not found' });
+      return res
+        .status(404)
+        .json({ success: false, error: "Infrastructure item not found" });
     }
 
     const item = items[0];
 
     // Admin/Manager can delete user-added data
     // Regular users can only delete their own data
-    if (userRole !== 'admin' && userRole !== 'manager' && item.user_id !== userId) {
-      return res.status(403).json({ success: false, error: 'Access denied' });
+    if (
+      userRole !== "admin" &&
+      userRole !== "manager" &&
+      item.user_id !== userId
+    ) {
+      return res.status(403).json({ success: false, error: "Access denied" });
     }
 
     // Log audit before deleting
-    await logAudit(id, userId, 'DELETE', item, null, req);
+    await logAudit(id, userId, "DELETE", item, null, req);
 
-    await pool.query('DELETE FROM infrastructure_items WHERE id = ?', [id]);
+    await pool.query("DELETE FROM infrastructure_items WHERE id = ?", [id]);
 
-    res.json({ success: true, message: 'Infrastructure item deleted successfully' });
+    res.json({
+      success: true,
+      message: "Infrastructure item deleted successfully"
+    });
   } catch (error) {
-    console.error('Delete infrastructure error:', error);
-    res.status(500).json({ success: false, error: 'Failed to delete infrastructure item' });
+    console.error("Delete infrastructure error:", error);
+    res
+      .status(500)
+      .json({ success: false, error: "Failed to delete infrastructure item" });
   }
 };
 
@@ -534,7 +656,7 @@ const importKML = async (req, res) => {
     const userRole = req.user.role;
     const { kmlData, filename } = req.body;
 
-    console.log('📥 KML Import Request:', {
+    console.log("📥 KML Import Request:", {
       userId,
       userRole,
       hasKmlData: !!kmlData,
@@ -544,28 +666,33 @@ const importKML = async (req, res) => {
     });
 
     // Only admin/manager can import
-    if (userRole !== 'admin' && userRole !== 'manager') {
-      console.error('❌ Import rejected: User role not authorized');
-      return res.status(403).json({ success: false, error: 'Only admin/manager can import KML files' });
+    if (userRole !== "admin" && userRole !== "manager") {
+      console.error("❌ Import rejected: User role not authorized");
+      return res.status(403).json({
+        success: false,
+        error: "Only admin/manager can import KML files"
+      });
     }
 
     if (!kmlData) {
-      console.error('❌ Import rejected: No KML data provided');
-      return res.status(400).json({ success: false, error: 'KML data is required' });
+      console.error("❌ Import rejected: No KML data provided");
+      return res
+        .status(400)
+        .json({ success: false, error: "KML data is required" });
     }
 
     // Parse KML data
-    console.log('🔄 Parsing KML data...');
+    console.log("🔄 Parsing KML data...");
     let parsedKML;
     try {
       parsedKML = await parseStringPromise(kmlData);
-      console.log('✅ KML parsed successfully:', {
+      console.log("✅ KML parsed successfully:", {
         hasKml: !!parsedKML?.kml,
         hasDocument: !!parsedKML?.kml?.Document,
         documentCount: parsedKML?.kml?.Document?.length
       });
     } catch (parseError) {
-      console.error('❌ KML parsing failed:', parseError.message);
+      console.error("❌ KML parsing failed:", parseError.message);
       return res.status(400).json({
         success: false,
         error: `Invalid KML format: ${parseError.message}`
@@ -578,27 +705,41 @@ const importKML = async (req, res) => {
     // Try direct placemarks under Document
     if (parsedKML?.kml?.Document?.[0]?.Placemark) {
       placemarks = parsedKML.kml.Document[0].Placemark;
-      console.log('📊 Found placemarks directly under Document:', placemarks.length);
+      console.log(
+        "📊 Found placemarks directly under Document:",
+        placemarks.length
+      );
     }
 
     // Also check for placemarks inside Folders
     if (parsedKML?.kml?.Document?.[0]?.Folder) {
       const folders = parsedKML.kml.Document[0].Folder;
-      console.log('📁 Found folders:', folders.length);
+      console.log("📁 Found folders:", folders.length);
 
       folders.forEach((folder, index) => {
         if (folder.Placemark) {
-          console.log(`📍 Folder ${index + 1} (${folder.name?.[0] || 'Unnamed'}) has ${folder.Placemark.length} placemarks`);
+          console.log(
+            `📍 Folder ${index + 1} (${folder.name?.[0] || "Unnamed"}) has ${
+              folder.Placemark.length
+            } placemarks`
+          );
           placemarks.push(...folder.Placemark);
         }
       });
-      console.log('📊 Total placemarks from all folders:', placemarks.length);
+      console.log("📊 Total placemarks from all folders:", placemarks.length);
     }
 
     if (placemarks.length === 0) {
-      console.error('❌ No placemarks found in KML file');
-      console.log('🔍 KML structure:', JSON.stringify(parsedKML, null, 2).substring(0, 1000));
-      return res.status(400).json({ success: false, error: 'No placemarks found in KML file. Please check if the KML file contains valid Placemark elements.' });
+      console.error("❌ No placemarks found in KML file");
+      console.log(
+        "🔍 KML structure:",
+        JSON.stringify(parsedKML, null, 2).substring(0, 1000)
+      );
+      return res.status(400).json({
+        success: false,
+        error:
+          "No placemarks found in KML file. Please check if the KML file contains valid Placemark elements."
+      });
     }
 
     console.log(`✅ Total placemarks to process: ${placemarks.length}`);
@@ -606,55 +747,57 @@ const importKML = async (req, res) => {
     // Generate import session ID
     const importSessionId = uuidv4();
     const importedItems = [];
+    const batchValues = [];
 
-    // Process each placemark
+    // Process each placemark and collect values for batch insert
+    console.log("🔄 Processing placemarks...");
     for (const placemark of placemarks) {
-      const name = placemark.name?.[0] || 'Unnamed';
-      const description = placemark.description?.[0] || '';
+      const name = placemark.name?.[0] || "Unnamed";
+      const description = placemark.description?.[0] || "";
       const coordinatesStr = placemark.Point?.[0]?.coordinates?.[0]?.trim();
 
       if (!coordinatesStr) continue;
 
-      const [lng, lat, height] = coordinatesStr.split(',').map((v) => parseFloat(v.trim()));
+      const [lng, lat, height] = coordinatesStr
+        .split(",")
+        .map((v) => parseFloat(v.trim()));
 
       if (isNaN(lat) || isNaN(lng)) continue;
 
       // Determine type from name or description
       const type =
-        name.toLowerCase().includes('subpop') || description.toLowerCase().includes('subpop')
-          ? 'SubPOP'
-          : 'POP';
+        name.toLowerCase().includes("subpop") ||
+        description.toLowerCase().includes("subpop")
+          ? "SubPOP"
+          : "POP";
 
       // Generate unique ID
-      const uniqueId = `KML-${type}-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+      const uniqueId = `KML-${type}-${Date.now()}-${Math.random()
+        .toString(36)
+        .substr(2, 6)
+        .toUpperCase()}`;
 
       // Auto-detect region
       const detectedRegionId = await detectRegionFromCoordinates(lat, lng);
 
-      // Insert into temporary import table
-      const [insertResult] = await pool.query(
-        `INSERT INTO infrastructure_imports
-         (import_session_id, imported_by, item_type, item_name, unique_id, network_id,
-          latitude, longitude, height, source, kml_filename, notes, detected_region_id, is_selected)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'KML', ?, ?, ?, TRUE)`,
-        [
-          importSessionId,
-          userId,
-          type,
-          name,
-          uniqueId,
-          `NET-${uniqueId}`,
-          lat,
-          lng,
-          height || null,
-          filename || 'imported.kml',
-          description,
-          detectedRegionId
-        ]
-      );
+      // Add to batch values
+      batchValues.push([
+        importSessionId,
+        userId,
+        type,
+        name,
+        uniqueId,
+        `NET-${uniqueId}`,
+        lat,
+        lng,
+        height || null,
+        filename || "imported.kml",
+        description,
+        detectedRegionId,
+        true // is_selected
+      ]);
 
       importedItems.push({
-        id: insertResult.insertId,  // Add the database ID
         name,
         type,
         uniqueId,
@@ -662,6 +805,23 @@ const importKML = async (req, res) => {
         longitude: lng,
         detectedRegionId
       });
+    }
+
+    // Batch insert all items (much faster than individual inserts)
+    if (batchValues.length > 0) {
+      console.log(`💾 Batch inserting ${batchValues.length} items...`);
+
+      // Prepare values for batch insert (add source='KML' to each row)
+      const formattedValues = batchValues.map((row) => [...row, "KML"]);
+
+      await pool.query(
+        `INSERT INTO infrastructure_imports
+         (import_session_id, imported_by, item_type, item_name, unique_id, network_id,
+          latitude, longitude, height, kml_filename, notes, detected_region_id, is_selected, source)
+         VALUES ?`,
+        [formattedValues]
+      );
+      console.log(`✅ Batch insert completed`);
     }
 
     res.json({
@@ -674,8 +834,10 @@ const importKML = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Import KML error:', error);
-    res.status(500).json({ success: false, error: 'Failed to import KML file' });
+    console.error("Import KML error:", error);
+    res
+      .status(500)
+      .json({ success: false, error: "Failed to import KML file" });
   }
 };
 
@@ -690,12 +852,37 @@ const getImportPreview = async (req, res) => {
     const userId = req.user.id;
     const userRole = req.user.role;
 
-    if (userRole !== 'admin' && userRole !== 'manager') {
-      return res.status(403).json({ success: false, error: 'Access denied' });
+    if (userRole !== "admin" && userRole !== "manager") {
+      return res.status(403).json({ success: false, error: "Access denied" });
     }
 
     const [items] = await pool.query(
-      `SELECT i.*, r.name as region_name
+      `SELECT
+        i.id,
+        i.import_session_id,
+        i.item_type as type,
+        i.item_name as name,
+        i.unique_id as uniqueId,
+        i.network_id as networkId,
+        i.latitude,
+        i.longitude,
+        i.height,
+        i.kml_filename as kmlFilename,
+        i.notes,
+        i.detected_region_id as detectedRegionId,
+        i.is_selected as isSelected,
+        i.source,
+        i.status,
+        i.contact_name as contactName,
+        i.contact_no as contactNo,
+        i.address_street as addressStreet,
+        i.address_city as addressCity,
+        i.address_state as addressState,
+        i.address_pincode as addressPincode,
+        i.structure_type as structureType,
+        i.bandwidth,
+        i.power_source as powerSource,
+        r.name as regionName
        FROM infrastructure_imports i
        LEFT JOIN regions r ON i.detected_region_id = r.id
        WHERE i.import_session_id = ? AND i.imported_by = ?
@@ -709,8 +896,10 @@ const getImportPreview = async (req, res) => {
       count: items.length
     });
   } catch (error) {
-    console.error('Get import preview error:', error);
-    res.status(500).json({ success: false, error: 'Failed to get import preview' });
+    console.error("Get import preview error:", error);
+    res
+      .status(500)
+      .json({ success: false, error: "Failed to get import preview" });
   }
 };
 
@@ -726,8 +915,8 @@ const saveImportedItems = async (req, res) => {
     const userRole = req.user.role;
     const { selectedIds } = req.body; // Array of IDs to save
 
-    if (userRole !== 'admin' && userRole !== 'manager') {
-      return res.status(403).json({ success: false, error: 'Access denied' });
+    if (userRole !== "admin" && userRole !== "manager") {
+      return res.status(403).json({ success: false, error: "Access denied" });
     }
 
     // Get selected items from import table
@@ -738,90 +927,104 @@ const saveImportedItems = async (req, res) => {
     const params = [sessionId, userId];
 
     if (selectedIds && selectedIds.length > 0) {
-      query += ` AND id IN (${selectedIds.map(() => '?').join(',')})`;
+      query += ` AND id IN (${selectedIds.map(() => "?").join(",")})`;
       params.push(...selectedIds);
     } else {
-      query += ' AND is_selected = TRUE';
+      query += " AND is_selected = TRUE";
     }
 
     const [importedItems] = await pool.query(query, params);
 
     if (importedItems.length === 0) {
-      return res.status(400).json({ success: false, error: 'No items selected to save' });
+      return res
+        .status(400)
+        .json({ success: false, error: "No items selected to save" });
     }
 
-    // Insert into main infrastructure table
-    let savedCount = 0;
-    for (const item of importedItems) {
-      const [result] = await pool.query(
-        `INSERT INTO infrastructure_items
-         (user_id, region_id, created_by, item_type, item_name, unique_id, network_id, ref_code,
-          latitude, longitude, height,
-          address_street, address_city, address_state, address_pincode,
-          contact_name, contact_phone, contact_email,
-          is_rented, rent_amount, agreement_start_date, agreement_end_date,
-          landlord_name, landlord_contact, nature_of_business, owner,
-          structure_type, ups_availability, ups_capacity, backup_capacity, power_source,
-          equipment_list, connected_to, bandwidth,
-          status, installation_date, maintenance_due_date,
-          source, kml_filename, notes, properties)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          userId,
-          item.detected_region_id,
-          userId,
-          item.item_type,
-          item.item_name,
-          item.unique_id,
-          item.network_id,
-          item.ref_code,
-          item.latitude,
-          item.longitude,
-          item.height,
-          item.address_street,
-          item.address_city,
-          item.address_state,
-          item.address_pincode,
-          item.contact_name,
-          item.contact_phone,
-          item.contact_email,
-          item.is_rented,
-          item.rent_amount,
-          item.agreement_start_date,
-          item.agreement_end_date,
-          item.landlord_name,
-          item.landlord_contact,
-          item.nature_of_business,
-          item.owner,
-          item.structure_type,
-          item.ups_availability,
-          item.ups_capacity,
-          item.backup_capacity,
-          item.power_source,
-          item.equipment_list,
-          item.connected_to,
-          item.bandwidth,
-          item.status,
-          item.installation_date,
-          item.maintenance_due_date,
-          item.source,
-          item.kml_filename,
-          item.notes,
-          item.properties
-        ]
-      );
+    // Prepare batch values for insert
+    console.log(
+      `💾 Batch saving ${importedItems.length} items to infrastructure table...`
+    );
+    const batchValues = importedItems.map((item) => [
+      userId,
+      item.detected_region_id,
+      userId,
+      item.item_type,
+      item.item_name,
+      item.unique_id,
+      item.network_id,
+      item.ref_code,
+      item.latitude,
+      item.longitude,
+      item.height,
+      item.address_street,
+      item.address_city,
+      item.address_state,
+      item.address_pincode,
+      item.contact_name,
+      item.contact_phone,
+      item.contact_email,
+      item.is_rented,
+      item.rent_amount,
+      item.agreement_start_date,
+      item.agreement_end_date,
+      item.landlord_name,
+      item.landlord_contact,
+      item.nature_of_business,
+      item.owner,
+      item.structure_type,
+      item.ups_availability,
+      item.ups_capacity,
+      item.backup_capacity,
+      item.power_source,
+      item.equipment_list,
+      item.connected_to,
+      item.bandwidth,
+      item.status || "Active",
+      item.installation_date,
+      item.maintenance_due_date,
+      item.source,
+      item.notes,
+      item.properties ? JSON.stringify(item.properties) : null
+    ]);
 
-      // Log audit for imported item
-      await logAudit(result.insertId, userId, 'IMPORT', null, {
-        item_type: item.item_type,
-        item_name: item.item_name,
-        unique_id: item.unique_id,
-        source: item.source,
-        kml_filename: item.kml_filename
-      }, req);
+    // Batch insert all items at once (much faster!)
+    await pool.query(
+      `INSERT INTO infrastructure_items
+       (user_id, region_id, created_by, item_type, item_name, unique_id, network_id, ref_code,
+        latitude, longitude, height,
+        address_street, address_city, address_state, address_pincode,
+        contact_name, contact_phone, contact_email,
+        is_rented, rent_amount, agreement_start_date, agreement_end_date,
+        landlord_name, landlord_contact, nature_of_business, owner,
+        structure_type, ups_availability, ups_capacity, backup_capacity, power_source,
+        equipment_list, connected_to, bandwidth,
+        status, installation_date, maintenance_due_date,
+        source, notes, properties)
+       VALUES ?`,
+      [batchValues]
+    );
 
-      savedCount++;
-    }
+    console.log(
+      `✅ Batch insert completed: ${importedItems.length} items saved`
+    );
+
+    // Log single audit entry for the batch import
+    await logAudit(
+      userId,
+      userId,
+      "IMPORT_BATCH",
+      null,
+      {
+        count: importedItems.length,
+        session_id: sessionId,
+        source: "KML",
+        kml_filename: importedItems[0]?.kml_filename
+      },
+      req
+    );
+
+    const savedCount = importedItems.length;
 
     res.json({
       success: true,
@@ -831,8 +1034,10 @@ const saveImportedItems = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Save imported items error:', error);
-    res.status(500).json({ success: false, error: 'Failed to save imported items' });
+    console.error("Save imported items error:", error);
+    res
+      .status(500)
+      .json({ success: false, error: "Failed to save imported items" });
   }
 };
 
@@ -847,19 +1052,21 @@ const deleteImportSession = async (req, res) => {
     const userId = req.user.id;
     const userRole = req.user.role;
 
-    if (userRole !== 'admin' && userRole !== 'manager') {
-      return res.status(403).json({ success: false, error: 'Access denied' });
+    if (userRole !== "admin" && userRole !== "manager") {
+      return res.status(403).json({ success: false, error: "Access denied" });
     }
 
     await pool.query(
-      'DELETE FROM infrastructure_imports WHERE import_session_id = ? AND imported_by = ?',
+      "DELETE FROM infrastructure_imports WHERE import_session_id = ? AND imported_by = ?",
       [sessionId, userId]
     );
 
-    res.json({ success: true, message: 'Import session deleted successfully' });
+    res.json({ success: true, message: "Import session deleted successfully" });
   } catch (error) {
-    console.error('Delete import session error:', error);
-    res.status(500).json({ success: false, error: 'Failed to delete import session' });
+    console.error("Delete import session error:", error);
+    res
+      .status(500)
+      .json({ success: false, error: "Failed to delete import session" });
   }
 };
 
@@ -873,11 +1080,11 @@ const getInfrastructureStats = async (req, res) => {
     const userId = req.user.id;
     const userRole = req.user.role;
 
-    let whereClause = '1=1';
+    let whereClause = "1=1";
     const params = [];
 
     // Role-based filtering
-    if (userRole !== 'admin' && userRole !== 'manager') {
+    if (userRole !== "admin" && userRole !== "manager") {
       whereClause = `(
         user_id = ?
         OR region_id IN (
@@ -911,8 +1118,11 @@ const getInfrastructureStats = async (req, res) => {
       data: stats[0]
     });
   } catch (error) {
-    console.error('Get infrastructure stats error:', error);
-    res.status(500).json({ success: false, error: 'Failed to get infrastructure statistics' });
+    console.error("Get infrastructure stats error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get infrastructure statistics"
+    });
   }
 };
 
@@ -925,15 +1135,16 @@ const getCategories = async (req, res) => {
   try {
     const { type } = req.query;
 
-    let query = 'SELECT * FROM infrastructure_categories WHERE is_active = TRUE';
+    let query =
+      "SELECT * FROM infrastructure_categories WHERE is_active = TRUE";
     const params = [];
 
     if (type) {
-      query += ' AND type = ?';
+      query += " AND type = ?";
       params.push(type);
     }
 
-    query += ' ORDER BY type, name';
+    query += " ORDER BY type, name";
 
     const [categories] = await pool.query(query, params);
 
@@ -943,8 +1154,8 @@ const getCategories = async (req, res) => {
       count: categories.length
     });
   } catch (error) {
-    console.error('Get categories error:', error);
-    res.status(500).json({ success: false, error: 'Failed to get categories' });
+    console.error("Get categories error:", error);
+    res.status(500).json({ success: false, error: "Failed to get categories" });
   }
 };
 

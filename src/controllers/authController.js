@@ -74,9 +74,9 @@ const login = async (req, res) => {
       });
     }
 
-    // Update last login time
+    // Update last login time and set online status
     await pool.query(
-      'UPDATE users SET last_login = NOW() WHERE id = ?',
+      'UPDATE users SET last_login = NOW(), is_online = TRUE WHERE id = ?',
       [user.id]
     );
 
@@ -405,10 +405,30 @@ const changePassword = async (req, res) => {
  * @access  Private
  */
 const logout = async (req, res) => {
-  res.json({
-    success: true,
-    message: 'Logged out successfully'
-  });
+  try {
+    const userId = req.user?.id;
+
+    if (userId) {
+      // Set user offline status
+      await pool.query(
+        'UPDATE users SET is_online = FALSE WHERE id = ?',
+        [userId]
+      );
+      console.log(`🚪 User ${userId} logged out - set to offline`);
+    }
+
+    res.json({
+      success: true,
+      message: 'Logged out successfully'
+    });
+  } catch (error) {
+    console.error('Logout error:', error);
+    // Even if DB update fails, still return success for logout
+    res.json({
+      success: true,
+      message: 'Logged out successfully'
+    });
+  }
 };
 
 /**

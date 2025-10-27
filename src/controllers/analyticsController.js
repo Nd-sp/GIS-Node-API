@@ -557,7 +557,7 @@ const getRecentActivity = async (req, res) => {
         dm.id,
         dm.user_id,
         dm.created_at,
-        dm.distance,
+        dm.total_distance,
         r.name as region_name
        FROM distance_measurements dm
        LEFT JOIN regions r ON dm.region_id = r.id
@@ -573,7 +573,7 @@ const getRecentActivity = async (req, res) => {
         pd.id,
         pd.user_id,
         pd.created_at,
-        pd.area_sqm,
+        pd.area,
         r.name as region_name
        FROM polygon_drawings pd
        LEFT JOIN regions r ON pd.region_id = r.id
@@ -606,7 +606,7 @@ const getRecentActivity = async (req, res) => {
         cd.id,
         cd.user_id,
         cd.created_at,
-        cd.radius_m,
+        cd.radius,
         r.name as region_name
        FROM circle_drawings cd
        LEFT JOIN regions r ON cd.region_id = r.id
@@ -641,7 +641,7 @@ const getRecentActivity = async (req, res) => {
         user_id: m.user_id,
         timestamp: m.created_at,
         action: 'Completed Distance Measurement',
-        details: `${m.distance ? m.distance.toFixed(2) + ' km' : 'Distance calculated'}`,
+        details: `${m.total_distance ? parseFloat(m.total_distance).toFixed(2) + ' km' : 'Distance calculated'}`,
         region: m.region_name || 'Unknown',
         type: 'measurement'
       });
@@ -653,7 +653,7 @@ const getRecentActivity = async (req, res) => {
         user_id: p.user_id,
         timestamp: p.created_at,
         action: 'Completed Polygon Drawing',
-        details: `${p.area_sqm ? (p.area_sqm / 1000000).toFixed(2) + ' km²' : 'Area calculated'}`,
+        details: `${p.area ? parseFloat(p.area).toFixed(2) + ' m²' : 'Area calculated'}`,
         region: p.region_name || 'Unknown',
         type: 'polygon'
       });
@@ -677,7 +677,7 @@ const getRecentActivity = async (req, res) => {
         user_id: c.user_id,
         timestamp: c.created_at,
         action: 'Created Coverage Circle',
-        details: `${c.radius_m ? (c.radius_m / 1000).toFixed(2) + ' km radius' : 'Circle created'}`,
+        details: `${c.radius ? parseFloat(c.radius).toFixed(2) + ' m radius' : 'Circle created'}`,
         region: c.region_name || 'Unknown',
         type: 'circle'
       });
@@ -752,10 +752,27 @@ const getUserStats = async (req, res) => {
       'SELECT COUNT(*) as count FROM users'
     );
 
-    // Get active users (logged in within last 30 minutes - considered "currently online")
+    // Get active users (using is_online flag)
     const [onlineUsers] = await pool.query(
-      'SELECT COUNT(*) as count FROM users WHERE last_login >= DATE_SUB(NOW(), INTERVAL 30 MINUTE)'
+      'SELECT COUNT(*) as count FROM users WHERE is_online = TRUE'
     );
+
+    // Get list of currently online users with details
+    const [onlineUsersList] = await pool.query(
+      `SELECT
+        id,
+        username,
+        full_name,
+        email,
+        role,
+        last_login,
+        TIMESTAMPDIFF(MINUTE, last_login, NOW()) as minutes_since_login
+       FROM users
+       WHERE is_online = TRUE
+       ORDER BY last_login DESC`
+    );
+
+    console.log('🔍 Online Users Query Result:', onlineUsersList);
 
     // Get users by role
     const [usersByRole] = await pool.query(
@@ -793,11 +810,20 @@ const getUserStats = async (req, res) => {
       roleStats[row.role] = parseInt(row.count);
     });
 
-    res.json({
+    const responseData = {
       success: true,
       data: {
         total: parseInt(totalUsers[0].count),
         currentlyOnline: parseInt(onlineUsers[0].count),
+        onlineUsers: onlineUsersList.map(user => ({
+          id: user.id,
+          name: user.full_name || user.username,
+          username: user.username,
+          email: user.email,
+          role: user.role,
+          lastLogin: user.last_login,
+          minutesSinceLogin: user.minutes_since_login
+        })),
         active: parseInt(activeUsers[0].count),
         newThisWeek: parseInt(newUsers[0].count),
         byRole: {
@@ -811,7 +837,12 @@ const getUserStats = async (req, res) => {
           activeUsers: parseInt(row.active_users)
         }))
       }
-    });
+    };
+
+    console.log('📤 Sending Response - Online Users Count:', responseData.data.onlineUsers.length);
+    console.log('📤 Sending Response - Online Users:', responseData.data.onlineUsers);
+
+    res.json(responseData);
   } catch (error) {
     console.error('Get user stats error:', error);
     res.status(500).json({ success: false, error: 'Failed to get user statistics' });

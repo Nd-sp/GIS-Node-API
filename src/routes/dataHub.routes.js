@@ -7,7 +7,9 @@ const {
   getImportHistory,
   exportData,
   getExportHistory,
-  downloadExport
+  downloadExport,
+  deleteSingleData,
+  deleteBulkData
 } = require('../controllers/dataHubController');
 
 router.use(authenticate);
@@ -18,5 +20,9 @@ router.get('/imports', getImportHistory);
 router.post('/export', exportData);
 router.get('/exports', getExportHistory);
 router.get('/exports/:id/download', downloadExport);
+
+// Delete routes
+router.delete('/delete/:type/:id', deleteSingleData);
+router.delete('/delete-bulk/:type', deleteBulkData);
 
 module.exports = router;

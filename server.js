@@ -19,7 +19,7 @@ app.use(helmet());
 // CORS configuration
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    origin: process.env.FRONTEND_URL || "http://localhost:3005",
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Request-ID", "X-Request-Time"],
@@ -203,6 +203,14 @@ try {
   // Reports routes
   const reportsRoutes = require("./src/routes/reports.routes");
   app.use("/api/reports", reportsRoutes);
+
+  // User Map Preferences routes
+  const userMapPreferencesRoutes = require("./src/routes/userMapPreferences.routes");
+  app.use("/api/user-map-preferences", userMapPreferencesRoutes);
+
+  // Search History routes
+  const searchHistoryRoutes = require("./src/routes/searchHistory.routes");
+  app.use("/api/search-history", searchHistoryRoutes);
 
   console.log("✅ All routes loaded successfully");
 } catch (error) {

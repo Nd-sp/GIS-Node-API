@@ -119,7 +119,7 @@ const createPolygon = async (req, res) => {
 
     const [result] = await pool.query(
       `INSERT INTO polygon_drawings
-       (user_id, region_id, polygon_name, vertices, area, perimeter,
+       (user_id, region_id, polygon_name, coordinates, area, perimeter,
         fill_color, stroke_color, opacity, properties, notes, is_saved)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
@@ -156,8 +156,14 @@ const createPolygon = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Create polygon error:', error);
-    res.status(500).json({ success: false, error: 'Failed to create polygon' });
+    console.error('❌ Create polygon error:', error);
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      sqlMessage: error.sqlMessage,
+      sql: error.sql
+    });
+    res.status(500).json({ success: false, error: 'Failed to create polygon', details: error.message });
   }
 };
 
