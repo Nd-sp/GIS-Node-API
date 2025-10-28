@@ -874,7 +874,7 @@ const getImportPreview = async (req, res) => {
         i.source,
         i.status,
         i.contact_name as contactName,
-        i.contact_no as contactNo,
+        i.contact_phone as contactPhone,
         i.address_street as addressStreet,
         i.address_city as addressCity,
         i.address_state as addressState,
