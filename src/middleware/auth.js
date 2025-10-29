@@ -49,6 +49,20 @@ const authenticate = async (req, res, next) => {
         });
       }
 
+      // Check if user has any active sessions (to detect force logout)
+      const [sessions] = await pool.query(
+        'SELECT id FROM user_sessions WHERE user_id = ? AND is_active = TRUE LIMIT 1',
+        [decoded.id]
+      );
+
+      if (sessions.length === 0) {
+        return res.status(401).json({
+          success: false,
+          error: 'Session has been terminated. Please log in again.',
+          sessionTerminated: true
+        });
+      }
+
       // Add user to request object
       req.user = user;
 

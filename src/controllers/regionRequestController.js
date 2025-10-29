@@ -1,4 +1,5 @@
 const { pool } = require('../config/database');
+const { createNotification, notifyAllAdmins } = require('./notificationController');
 
 /**
  * @route   GET /api/region-requests
@@ -130,6 +131,40 @@ const createRequest = async (req, res) => {
 
     console.log(`✅ Created region request ID: ${result.insertId} for user ${userId} - ${request_type} for region ${regionId}`);
 
+    // Get region and user info for notification
+    const [regionInfo] = await pool.query('SELECT name, code FROM regions WHERE id = ?', [regionId]);
+    const [userInfo] = await pool.query('SELECT username, full_name FROM users WHERE id = ?', [userId]);
+
+    const regionName = regionInfo[0]?.name || 'Unknown Region';
+    const userName = userInfo[0]?.full_name || userInfo[0]?.username || 'User';
+
+    // Notify all admins about the new region request
+    try {
+      await notifyAllAdmins(
+        'region_request',
+        '🗺️ New Region Request',
+        `${userName} has requested ${request_type} for ${regionName}`,
+        {
+          data: {
+            requestId: result.insertId,
+            userId,
+            userName,
+            regionId,
+            regionName,
+            requestType: request_type,
+            reason
+          },
+          priority: 'high',
+          action_url: '/admin/region-requests',
+          action_label: 'View Request'
+        }
+      );
+      console.log(`📧 Admins notified about region request ID: ${result.insertId}`);
+    } catch (notifError) {
+      console.error('Failed to send notification to admins:', notifError);
+      // Don't fail the request if notification fails
+    }
+
     res.status(201).json({
       success: true,
       request: {
@@ -216,6 +251,39 @@ const approveRequest = async (req, res) => {
 
       await connection.commit();
 
+      // Get region and user info for notification
+      const [regionInfo] = await pool.query('SELECT name, code FROM regions WHERE id = ?', [request.region_id]);
+      const [userInfo] = await pool.query('SELECT username, full_name FROM users WHERE id = ?', [request.user_id]);
+
+      const regionName = regionInfo[0]?.name || 'Unknown Region';
+      const userName = userInfo[0]?.full_name || userInfo[0]?.username || 'User';
+
+      // Notify the user that their request was approved
+      try {
+        await createNotification(
+          request.user_id,
+          'region_request',
+          '✅ Region Request Approved',
+          `Your request for ${request.request_type} to ${regionName} has been approved`,
+          {
+            data: {
+              requestId: id,
+              regionId: request.region_id,
+              regionName,
+              requestType: request.request_type,
+              reviewNotes: review_notes
+            },
+            priority: 'high',
+            action_url: '/map',
+            action_label: 'View Map'
+          }
+        );
+        console.log(`📧 User ${userName} notified about approved region request ID: ${id}`);
+      } catch (notifError) {
+        console.error('Failed to send notification to user:', notifError);
+        // Don't fail the request if notification fails
+      }
+
       res.json({ success: true, message: 'Request approved successfully' });
     } catch (err) {
       await connection.rollback();
@@ -250,7 +318,7 @@ const rejectRequest = async (req, res) => {
 
     // Get request details
     const [requests] = await pool.query(
-      'SELECT status FROM region_requests WHERE id = ?',
+      'SELECT * FROM region_requests WHERE id = ?',
       [id]
     );
 
@@ -258,10 +326,12 @@ const rejectRequest = async (req, res) => {
       return res.status(404).json({ success: false, error: 'Request not found' });
     }
 
-    if (requests[0].status !== 'pending') {
+    const request = requests[0];
+
+    if (request.status !== 'pending') {
       return res.status(400).json({
         success: false,
-        error: `Request already ${requests[0].status}`
+        error: `Request already ${request.status}`
       });
     }
 
@@ -274,6 +344,39 @@ const rejectRequest = async (req, res) => {
        WHERE id = ?`,
       [review_notes || 'Rejected', reviewerId, id]
     );
+
+    // Get region and user info for notification
+    const [regionInfo] = await pool.query('SELECT name, code FROM regions WHERE id = ?', [request.region_id]);
+    const [userInfo] = await pool.query('SELECT username, full_name FROM users WHERE id = ?', [request.user_id]);
+
+    const regionName = regionInfo[0]?.name || 'Unknown Region';
+    const userName = userInfo[0]?.full_name || userInfo[0]?.username || 'User';
+
+    // Notify the user that their request was rejected
+    try {
+      await createNotification(
+        request.user_id,
+        'region_request',
+        '❌ Region Request Rejected',
+        `Your request for ${request.request_type} to ${regionName} has been rejected`,
+        {
+          data: {
+            requestId: id,
+            regionId: request.region_id,
+            regionName,
+            requestType: request.request_type,
+            reviewNotes: review_notes
+          },
+          priority: 'high',
+          action_url: '/region-requests',
+          action_label: 'View Requests'
+        }
+      );
+      console.log(`📧 User ${userName} notified about rejected region request ID: ${id}`);
+    } catch (notifError) {
+      console.error('Failed to send notification to user:', notifError);
+      // Don't fail the request if notification fails
+    }
 
     res.json({ success: true, message: 'Request rejected successfully' });
   } catch (error) {

@@ -212,6 +212,14 @@ try {
   const searchHistoryRoutes = require("./src/routes/searchHistory.routes");
   app.use("/api/search-history", searchHistoryRoutes);
 
+  // Notification routes
+  const notificationRoutes = require("./src/routes/notification.routes");
+  app.use("/api/notifications", notificationRoutes);
+
+  // Password Reset Request routes
+  const passwordResetRequestRoutes = require("./src/routes/passwordResetRequest.routes");
+  app.use("/api/password-reset-requests", passwordResetRequestRoutes);
+
   console.log("✅ All routes loaded successfully");
 } catch (error) {
   console.warn("⚠️ Some routes not loaded yet:", error.message);
@@ -224,7 +232,7 @@ app.use(notFound);
 app.use(errorHandler);
 
 // Server configuration
-const PORT = process.env.PORT || 5005;
+const PORT = process.env.PORT || 82;
 
 // Start server
 const startServer = async () => {

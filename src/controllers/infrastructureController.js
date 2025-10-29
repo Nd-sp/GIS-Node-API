@@ -141,7 +141,7 @@ const canAccessInfrastructure = async (
 
 /**
  * @route   GET /api/infrastructure
- * @desc    Get all infrastructure items (with role-based filtering)
+ * @desc    Get all infrastructure items (with role-based filtering, no pagination)
  * @access  Private
  */
 const getAllInfrastructure = async (req, res) => {
@@ -155,7 +155,9 @@ const getAllInfrastructure = async (req, res) => {
       source,
       search,
       filter,
-      userId: filterUserId
+      userId: filterUserId,
+      sortBy,
+      sortOrder
     } = req.query;
 
     console.log("🏗️ Infrastructure getAllInfrastructure request:", {
@@ -164,6 +166,9 @@ const getAllInfrastructure = async (req, res) => {
       filter,
       filterUserId
     });
+
+    const sortColumn = sortBy || "created_at";
+    const sortDirection = sortOrder?.toUpperCase() === "ASC" ? "ASC" : "DESC";
 
     let query = `
       SELECT i.*,
@@ -178,6 +183,7 @@ const getAllInfrastructure = async (req, res) => {
     const params = [];
 
     // Role-based filtering with explicit filter parameter support
+    const roleFilterClause = [];
     if (filter === "all" && (userRole === "admin" || userRole === "manager")) {
       // Admin/Manager viewing ALL users' data
       console.log("🏗️ Admin/Manager viewing ALL infrastructure data");
@@ -189,26 +195,22 @@ const getAllInfrastructure = async (req, res) => {
       // Admin/Manager viewing specific user's data
       const parsedUserId = parseInt(filterUserId);
       if (!isNaN(parsedUserId) && parsedUserId > 0) {
-        query += " AND i.user_id = ?";
+        roleFilterClause.push(" AND i.user_id = ?");
         params.push(parsedUserId);
         console.log("🏗️ Admin/Manager viewing user", parsedUserId);
       } else {
         console.log("⚠️ Invalid userId filter, defaulting to current user");
-        query += " AND i.user_id = ?";
+        roleFilterClause.push(" AND i.user_id = ?");
         params.push(userId);
       }
     } else {
       // Default: Users see only their own data
-      // Regular users or no specific filter
       if (userRole === "admin" || userRole === "manager") {
         // Admin/Manager without filter sees all data
         console.log("🏗️ Admin/Manager viewing all data (no filter specified)");
       } else {
-        // Regular users see only:
-        // 1. Their own data
-        // 2. Data from assigned regions
-        // 3. Data from temporary access regions
-        query += ` AND (
+        // Regular users see only their data or data from assigned regions
+        const userFilterClause = ` AND (
           i.user_id = ?
           OR i.region_id IN (
             SELECT region_id FROM user_regions WHERE user_id = ?
@@ -218,10 +220,14 @@ const getAllInfrastructure = async (req, res) => {
             AND expires_at > NOW() AND revoked_at IS NULL
           )
         )`;
+        roleFilterClause.push(userFilterClause);
         params.push(userId, userId, userId);
         console.log("🏗️ Regular user viewing own data");
       }
     }
+
+    // Apply role filter
+    query += roleFilterClause.join("");
 
     // Additional filters
     if (regionId) {
@@ -241,29 +247,43 @@ const getAllInfrastructure = async (req, res) => {
       params.push(source);
     }
     if (search) {
-      query += ` AND (
+      const searchClause = ` AND (
         i.item_name LIKE ? OR
         i.unique_id LIKE ? OR
         i.network_id LIKE ? OR
         i.address_city LIKE ? OR
         i.address_state LIKE ?
       )`;
+      query += searchClause;
       const searchTerm = `%${search}%`;
       params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
     }
 
-    query += " ORDER BY i.created_at DESC";
+    // Sorting
+    const allowedSortColumns = [
+      "created_at",
+      "updated_at",
+      "item_name",
+      "item_type",
+      "status",
+      "latitude",
+      "longitude"
+    ];
+    const safeSortColumn = allowedSortColumns.includes(sortColumn)
+      ? sortColumn
+      : "created_at";
+    query += ` ORDER BY i.${safeSortColumn} ${sortDirection}`;
 
+    // Execute query
     const [items] = await pool.query(query, params);
 
     console.log("🏗️ Infrastructure getAllInfrastructure response:", {
-      count: items.length,
-      sampleItem: items[0] || null
+      count: items.length
     });
 
     res.json({
       success: true,
-      items: items, // Changed from 'data' to 'items' to match frontend expectation
+      items: items,
       count: items.length
     });
   } catch (error) {
@@ -711,18 +731,44 @@ const importKML = async (req, res) => {
       );
     }
 
-    // Also check for placemarks inside Folders
+    // ✅ FIX: Check for placemarks inside Folders and detect type from folder name
     if (parsedKML?.kml?.Document?.[0]?.Folder) {
       const folders = parsedKML.kml.Document[0].Folder;
       console.log("📁 Found folders:", folders.length);
 
       folders.forEach((folder, index) => {
         if (folder.Placemark) {
+          const folderName = (folder.name?.[0] || "").toLowerCase();
+
+          // Detect type from folder name
+          let folderType = "POP"; // Default
+          if (
+            folderName.includes("spop") ||
+            folderName.includes("subpop") ||
+            folderName.includes("sub_pop") ||
+            folderName.includes("p_spop")
+          ) {
+            folderType = "SubPOP";
+          } else if (
+            folderName.includes("pop") ||
+            folderName.includes("p_pop")
+          ) {
+            folderType = "POP";
+          }
+
           console.log(
-            `📍 Folder ${index + 1} (${folder.name?.[0] || "Unnamed"}) has ${
+            `📍 Folder ${index + 1} "${
+              folder.name?.[0] || "Unnamed"
+            }" detected as ${folderType}, has ${
               folder.Placemark.length
             } placemarks`
           );
+
+          // Add folder type to each placemark for later use
+          folder.Placemark.forEach((placemark) => {
+            placemark._folderType = folderType;
+          });
+
           placemarks.push(...folder.Placemark);
         }
       });
@@ -764,12 +810,55 @@ const importKML = async (req, res) => {
 
       if (isNaN(lat) || isNaN(lng)) continue;
 
-      // Determine type from name or description
-      const type =
-        name.toLowerCase().includes("subpop") ||
-        description.toLowerCase().includes("subpop")
-          ? "SubPOP"
-          : "POP";
+      // ✅ IMPROVED TYPE DETECTION - Multi-level approach
+      let type = placemark._folderType || "POP"; // Use folder type if available
+
+      // Extract ExtendedData for unique_id check
+      let uniqueIdFromKML = null;
+      if (placemark.ExtendedData?.[0]?.Data) {
+        const dataFields = placemark.ExtendedData[0].Data;
+        const uniqueIdField = dataFields.find((d) => d.$.name === "unique_id");
+        if (uniqueIdField?.value?.[0]) {
+          uniqueIdFromKML = uniqueIdField.value[0];
+        }
+      }
+
+      // If folder type wasn't detected, try other methods
+      if (!placemark._folderType) {
+        const nameStr = name.toLowerCase();
+        const descStr = description.toLowerCase();
+
+        // Method 1: Check unique_id from ExtendedData (most reliable)
+        if (uniqueIdFromKML) {
+          if (
+            uniqueIdFromKML.startsWith("SPOP.") ||
+            uniqueIdFromKML.startsWith("SUBPOP.")
+          ) {
+            type = "SubPOP";
+          } else if (uniqueIdFromKML.startsWith("POP.")) {
+            type = "POP";
+          }
+        }
+        // Method 2: Check name and description
+        else if (
+          nameStr.includes("spop") ||
+          nameStr.includes("subpop") ||
+          nameStr.includes("sub-pop") ||
+          nameStr.includes("sub pop") ||
+          descStr.includes("spop") ||
+          descStr.includes("subpop")
+        ) {
+          type = "SubPOP";
+        } else if (nameStr.includes("pop") || descStr.includes("pop")) {
+          type = "POP";
+        }
+      }
+
+      console.log(
+        `📋 "${name}" → Type: ${type} (Folder: ${
+          placemark._folderType || "none"
+        }, UniqueID: ${uniqueIdFromKML || "none"})`
+      );
 
       // Generate unique ID
       const uniqueId = `KML-${type}-${Date.now()}-${Math.random()
@@ -784,7 +873,7 @@ const importKML = async (req, res) => {
       batchValues.push([
         importSessionId,
         userId,
-        type,
+        type, // ✅ This should now be correctly detected
         name,
         uniqueId,
         `NET-${uniqueId}`,
@@ -799,7 +888,7 @@ const importKML = async (req, res) => {
 
       importedItems.push({
         name,
-        type,
+        type, // ✅ This should now be correctly detected
         uniqueId,
         latitude: lat,
         longitude: lng,
@@ -824,9 +913,14 @@ const importKML = async (req, res) => {
       console.log(`✅ Batch insert completed`);
     }
 
+    // Log summary
+    const popCount = importedItems.filter((i) => i.type === "POP").length;
+    const subPopCount = importedItems.filter((i) => i.type === "SubPOP").length;
+    console.log(`📊 Import Summary: ${popCount} POPs, ${subPopCount} SubPOPs`);
+
     res.json({
       success: true,
-      message: `Imported ${importedItems.length} items to preview`,
+      message: `Imported ${importedItems.length} items to preview (${popCount} POPs, ${subPopCount} SubPOPs)`,
       data: {
         importSessionId,
         itemCount: importedItems.length,
@@ -874,7 +968,7 @@ const getImportPreview = async (req, res) => {
         i.source,
         i.status,
         i.contact_name as contactName,
-        i.contact_no as contactNo,
+        i.contact_phone as contactPhone,
         i.address_street as addressStreet,
         i.address_city as addressCity,
         i.address_state as addressState,
@@ -1159,6 +1253,277 @@ const getCategories = async (req, res) => {
   }
 };
 
+/**
+ * @route   GET /api/infrastructure/map-view
+ * @desc    Get infrastructure items within map viewport (optimized for map rendering)
+ * @access  Private
+ * @query   north, south, east, west (bounding box), zoom (1-20), regionId (optional)
+ */
+const getMapViewInfrastructure = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const userRole = (req.user.role || "").toLowerCase();
+    const { north, south, east, west, zoom, regionId, limit } = req.query;
+
+    // Validate bounding box parameters
+    if (!north || !south || !east || !west) {
+      return res.status(400).json({
+        success: false,
+        error: "Bounding box required: north, south, east, west"
+      });
+    }
+
+    const bounds = {
+      north: parseFloat(north),
+      south: parseFloat(south),
+      east: parseFloat(east),
+      west: parseFloat(west)
+    };
+
+    // Validate coordinates
+    if (
+      isNaN(bounds.north) ||
+      isNaN(bounds.south) ||
+      isNaN(bounds.east) ||
+      isNaN(bounds.west)
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid bounding box coordinates"
+      });
+    }
+
+    const zoomLevel = zoom ? parseInt(zoom) : 10;
+
+    // Determine result limit based on zoom level
+    let resultLimit = limit ? parseInt(limit) : null;
+    if (!resultLimit) {
+      if (zoomLevel <= 8) resultLimit = 500; // Country/state view
+      else if (zoomLevel <= 12) resultLimit = 1000; // City view
+      else resultLimit = 2000; // Street view
+    }
+
+    console.log("🗺️ Map view request:", {
+      userId,
+      userRole,
+      bounds,
+      zoom: zoomLevel,
+      limit: resultLimit
+    });
+
+    // Build query - select only essential fields for map rendering
+    let query = `
+      SELECT
+        i.id,
+        i.item_type,
+        i.item_name,
+        i.unique_id,
+        i.latitude,
+        i.longitude,
+        i.status,
+        i.region_id,
+        r.name as region_name
+      FROM infrastructure_items i
+      LEFT JOIN regions r ON i.region_id = r.id
+      WHERE i.latitude BETWEEN ? AND ?
+      AND i.longitude BETWEEN ? AND ?
+    `;
+    const params = [bounds.south, bounds.north, bounds.west, bounds.east];
+
+    // Role-based filtering
+    if (userRole !== "admin" && userRole !== "manager") {
+      query += ` AND (
+        i.user_id = ?
+        OR i.region_id IN (
+          SELECT region_id FROM user_regions WHERE user_id = ?
+          UNION
+          SELECT resource_id FROM temporary_access
+          WHERE user_id = ? AND resource_type = 'region'
+          AND expires_at > NOW() AND revoked_at IS NULL
+        )
+      )`;
+      params.push(userId, userId, userId);
+    }
+
+    // Optional region filter
+    if (regionId) {
+      query += " AND i.region_id = ?";
+      params.push(regionId);
+    }
+
+    // Only show active items on map by default (can be customized)
+    query += " AND i.status IN ('Active', 'RFS', 'Maintenance')";
+
+    // Add limit
+    query += ` LIMIT ?`;
+    params.push(resultLimit);
+
+    const [items] = await pool.query(query, params);
+
+    console.log(`🗺️ Map view response: ${items.length} items`);
+
+    res.json({
+      success: true,
+      items: items,
+      count: items.length,
+      bounds: bounds,
+      zoom: zoomLevel,
+      limited: items.length >= resultLimit
+    });
+  } catch (error) {
+    console.error("Get map view infrastructure error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get map view infrastructure"
+    });
+  }
+};
+
+/**
+ * @route   GET /api/infrastructure/clusters
+ * @desc    Get clustered infrastructure data for low zoom levels
+ * @access  Private
+ * @query   north, south, east, west (bounding box), zoom (1-20), gridSize (optional)
+ */
+const getClusters = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const userRole = (req.user.role || "").toLowerCase();
+    const { north, south, east, west, zoom, gridSize, regionId } = req.query;
+
+    // Validate bounding box
+    if (!north || !south || !east || !west) {
+      return res.status(400).json({
+        success: false,
+        error: "Bounding box required: north, south, east, west"
+      });
+    }
+
+    const bounds = {
+      north: parseFloat(north),
+      south: parseFloat(south),
+      east: parseFloat(east),
+      west: parseFloat(west)
+    };
+
+    const zoomLevel = zoom ? parseInt(zoom) : 10;
+
+    // For high zoom levels (15+), return individual markers instead of clusters
+    if (zoomLevel >= 15) {
+      console.log("🗺️ Zoom level high, redirecting to individual markers...");
+      return getMapViewInfrastructure(req, res);
+    }
+
+    // Calculate grid size based on zoom level
+    // Lower zoom = larger grid cells = more aggressive clustering
+    let grid = gridSize ? parseFloat(gridSize) : null;
+    if (!grid) {
+      if (zoomLevel <= 5) grid = 2.0; // ~220km grid cells
+      else if (zoomLevel <= 8) grid = 0.5; // ~55km grid cells
+      else if (zoomLevel <= 11) grid = 0.1; // ~11km grid cells
+      else grid = 0.05; // ~5.5km grid cells
+    }
+
+    console.log("🗺️ Cluster request:", {
+      userId,
+      userRole,
+      bounds,
+      zoom: zoomLevel,
+      gridSize: grid
+    });
+
+    // Build clustering query using grid-based aggregation
+    let query = `
+      SELECT
+        ROUND(i.latitude / ?, 0) * ? as grid_lat,
+        ROUND(i.longitude / ?, 0) * ? as grid_lng,
+        COUNT(*) as count,
+        SUM(CASE WHEN i.item_type = 'POP' THEN 1 ELSE 0 END) as pop_count,
+        SUM(CASE WHEN i.item_type = 'SubPOP' THEN 1 ELSE 0 END) as subpop_count,
+        AVG(i.latitude) as latitude,
+        AVG(i.longitude) as longitude,
+        GROUP_CONCAT(DISTINCT i.item_type) as types,
+        GROUP_CONCAT(DISTINCT r.name) as regions
+      FROM infrastructure_items i
+      LEFT JOIN regions r ON i.region_id = r.id
+      WHERE i.latitude BETWEEN ? AND ?
+      AND i.longitude BETWEEN ? AND ?
+    `;
+    const params = [
+      grid,
+      grid,
+      grid,
+      grid,
+      bounds.south,
+      bounds.north,
+      bounds.west,
+      bounds.east
+    ];
+
+    // Role-based filtering
+    if (userRole !== "admin" && userRole !== "manager") {
+      query += ` AND (
+        i.user_id = ?
+        OR i.region_id IN (
+          SELECT region_id FROM user_regions WHERE user_id = ?
+          UNION
+          SELECT resource_id FROM temporary_access
+          WHERE user_id = ? AND resource_type = 'region'
+          AND expires_at > NOW() AND revoked_at IS NULL
+        )
+      )`;
+      params.push(userId, userId, userId);
+    }
+
+    // Optional region filter
+    if (regionId) {
+      query += " AND i.region_id = ?";
+      params.push(regionId);
+    }
+
+    // Only show active items
+    query += " AND i.status IN ('Active', 'RFS', 'Maintenance')";
+
+    // Group by grid cell
+    query += " GROUP BY grid_lat, grid_lng";
+
+    // Limit clusters
+    query += " LIMIT 1000";
+
+    const [clusters] = await pool.query(query, params);
+
+    // Format clusters for frontend
+    const formattedClusters = clusters.map((cluster) => ({
+      type: "cluster",
+      latitude: cluster.latitude,
+      longitude: cluster.longitude,
+      count: cluster.count,
+      pop_count: cluster.pop_count,
+      subpop_count: cluster.subpop_count,
+      types: cluster.types ? cluster.types.split(",") : [],
+      regions: cluster.regions ? cluster.regions.split(",") : []
+    }));
+
+    console.log(`🗺️ Cluster response: ${formattedClusters.length} clusters`);
+
+    res.json({
+      success: true,
+      clusters: formattedClusters,
+      count: formattedClusters.length,
+      bounds: bounds,
+      zoom: zoomLevel,
+      gridSize: grid,
+      clusteringEnabled: true
+    });
+  } catch (error) {
+    console.error("Get clusters error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get infrastructure clusters"
+    });
+  }
+};
+
 module.exports = {
   getAllInfrastructure,
   getInfrastructureById,
@@ -1170,5 +1535,7 @@ module.exports = {
   saveImportedItems,
   deleteImportSession,
   getInfrastructureStats,
-  getCategories
+  getCategories,
+  getMapViewInfrastructure,
+  getClusters
 };

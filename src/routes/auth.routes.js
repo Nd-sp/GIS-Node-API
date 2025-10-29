@@ -7,7 +7,8 @@ const {
   changePassword,
   logout,
   verifyEmail,
-  resendVerificationEmail
+  resendVerificationEmail,
+  validateSession
 } = require('../controllers/authController');
 const { authenticate } = require('../middleware/auth');
 
@@ -64,7 +65,18 @@ router.get('/verify', authenticate, (req, res) => {
  * @desc    Verify user's email address
  * @access  Public
  */
-router.get('/verify-email/:token', verifyEmail);
+router.get('/verify-email/:token', (req, res, next) => {
+  console.log('\n╔════════════════════════════════════════════════════════╗');
+  console.log('║  EMAIL VERIFICATION ROUTE HIT                          ║');
+  console.log('╚════════════════════════════════════════════════════════╝');
+  console.log('📍 Route: GET /api/auth/verify-email/:token');
+  console.log('🔗 Full URL:', req.originalUrl);
+  console.log('🎫 Token param:', req.params.token ? req.params.token.substring(0, 50) + '...' : 'NO TOKEN');
+  console.log('🌐 Origin:', req.headers.origin || 'No origin header');
+  console.log('📝 Headers:', JSON.stringify(req.headers, null, 2));
+  console.log('════════════════════════════════════════════════════════\n');
+  next();
+}, verifyEmail);
 
 /**
  * @route   POST /api/auth/resend-verification
@@ -72,5 +84,12 @@ router.get('/verify-email/:token', verifyEmail);
  * @access  Public
  */
 router.post('/resend-verification', resendVerificationEmail);
+
+/**
+ * @route   GET /api/auth/validate-session
+ * @desc    Validate if current session is still active
+ * @access  Private
+ */
+router.get('/validate-session', authenticate, validateSession);
 
 module.exports = router;

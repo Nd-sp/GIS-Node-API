@@ -1,6 +1,8 @@
 const { pool } = require('../config/database');
 const { hashPassword } = require('../utils/bcrypt');
 const { logAudit } = require('./auditController');
+const { sendVerificationEmail } = require('../services/emailService');
+const { createNotification, notifyAllAdmins } = require('./notificationController');
 
 /**
  * Helper function to calculate time remaining
@@ -50,8 +52,8 @@ const getAllUsers = async (req, res) => {
     const { page = 1, limit = 10, search = '', role } = req.query;
     const offset = (page - 1) * limit;
 
-    // Build query - include new fields
-    let query = 'SELECT id, username, email, full_name, gender, role, phone, department, office_location, street, city, state, pincode, is_active, created_at FROM users WHERE 1=1';
+    // Build query - include new fields and email verification status
+    let query = 'SELECT id, username, email, full_name, gender, role, phone, department, office_location, street, city, state, pincode, is_active, is_email_verified, email_verified_at, created_at FROM users WHERE 1=1';
     const params = [];
 
     // Search filter
@@ -68,7 +70,7 @@ const getAllUsers = async (req, res) => {
     }
 
     // Get total count
-    const [countResult] = await pool.query(query.replace('SELECT id, username, email, full_name, gender, role, phone, department, office_location, street, city, state, pincode, is_active, created_at', 'SELECT COUNT(*) as total'), params);
+    const [countResult] = await pool.query(query.replace('SELECT id, username, email, full_name, gender, role, phone, department, office_location, street, city, state, pincode, is_active, is_email_verified, email_verified_at, created_at', 'SELECT COUNT(*) as total'), params);
     const total = countResult[0].total;
 
     // Get paginated data
@@ -182,10 +184,21 @@ const getUserById = async (req, res) => {
  */
 const createUser = async (req, res) => {
   try {
-    const {
-      username, email, password, full_name, role, phone, department, office_location,
-      gender, street, city, state, pincode, assignedRegions
-    } = req.body;
+    // Trim whitespace from all text inputs to prevent issues
+    const username = req.body.username?.trim();
+    const email = req.body.email?.trim().toLowerCase();
+    const password = req.body.password;
+    const full_name = req.body.full_name?.trim();
+    const role = req.body.role;
+    const phone = req.body.phone?.trim();
+    const department = req.body.department?.trim();
+    const office_location = req.body.office_location?.trim();
+    const gender = req.body.gender;
+    const street = req.body.street?.trim();
+    const city = req.body.city?.trim();
+    const state = req.body.state?.trim();
+    const pincode = req.body.pincode?.trim();
+    const assignedRegions = req.body.assignedRegions;
 
     // DEBUG LOGGING
     console.log('=== CREATE USER DEBUG ===');
@@ -300,6 +313,22 @@ const createUser = async (req, res) => {
       [userId]
     );
 
+    // Send verification email
+    try {
+      await sendVerificationEmail({
+        id: userId,
+        email,
+        username,
+        full_name,
+        role: role || 'viewer',
+        password // Send plain password before it was hashed
+      });
+      console.log(`✅ Verification email sent to ${email} (User created by admin)`);
+    } catch (emailError) {
+      console.error('Failed to send verification email:', emailError);
+      // Continue even if email fails - user is still created
+    }
+
     // Log audit
     await logAudit(createdBy, 'CREATE', 'user', userId, {
       username,
@@ -311,7 +340,8 @@ const createUser = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      user: newUser[0]
+      user: newUser[0],
+      message: 'User created successfully. Verification email has been sent.'
     });
   } catch (error) {
     console.error('Create user error:', error);
@@ -327,7 +357,21 @@ const createUser = async (req, res) => {
 const updateUser = async (req, res) => {
   try {
     const { id } = req.params;
-    const { username, full_name, email, gender, role, phone, department, office_location, street, city, state, pincode, assignedRegions } = req.body;
+
+    // Trim whitespace from all text inputs to prevent issues
+    const username = req.body.username?.trim();
+    const full_name = req.body.full_name?.trim();
+    const email = req.body.email?.trim().toLowerCase();
+    const gender = req.body.gender;
+    const role = req.body.role;
+    const phone = req.body.phone?.trim();
+    const department = req.body.department?.trim();
+    const office_location = req.body.office_location?.trim();
+    const street = req.body.street?.trim();
+    const city = req.body.city?.trim();
+    const state = req.body.state?.trim();
+    const pincode = req.body.pincode?.trim();
+    const assignedRegions = req.body.assignedRegions;
 
     console.log('=== UPDATE USER DEBUG ===');
     console.log('User ID:', id);
@@ -432,6 +476,15 @@ const updateUser = async (req, res) => {
     if (assignedRegions && Array.isArray(assignedRegions)) {
       console.log(`🔄 Updating assigned regions for user ${id}...`);
 
+      // Get existing regions before update (for notification)
+      const [existingRegions] = await pool.query(
+        `SELECT r.name FROM regions r
+         INNER JOIN user_regions ur ON r.id = ur.region_id
+         WHERE ur.user_id = ?`,
+        [id]
+      );
+      const oldRegionNames = existingRegions.map(r => r.name);
+
       // First, remove all existing region assignments
       await pool.query('DELETE FROM user_regions WHERE user_id = ?', [id]);
       console.log(`Removed existing region assignments for user ${id}`);
@@ -494,6 +547,50 @@ const updateUser = async (req, res) => {
         }
       }
       console.log(`✅ Updated regions for user ${id}`);
+
+      // Notify user about region changes
+      const addedRegions = assignedRegions.filter(r => !oldRegionNames.includes(r));
+      const removedRegions = oldRegionNames.filter(r => !assignedRegions.includes(r));
+
+      if (addedRegions.length > 0 || removedRegions.length > 0) {
+        try {
+          // Get user info for notification
+          const [userInfo] = await pool.query('SELECT username, full_name FROM users WHERE id = ?', [id]);
+          const userName = userInfo[0]?.full_name || userInfo[0]?.username || 'User';
+
+          let notificationMessage = 'Your assigned regions have been updated by an administrator.\n\n';
+
+          if (addedRegions.length > 0) {
+            notificationMessage += `✅ Added: ${addedRegions.join(', ')}\n`;
+          }
+          if (removedRegions.length > 0) {
+            notificationMessage += `❌ Removed: ${removedRegions.join(', ')}\n`;
+          }
+
+          notificationMessage += `\nCurrent regions: ${assignedRegions.length > 0 ? assignedRegions.join(', ') : 'None'}`;
+
+          await createNotification(
+            id,
+            'region_request',
+            '🗺️ Regions Updated',
+            notificationMessage,
+            {
+              data: {
+                addedRegions,
+                removedRegions,
+                currentRegions: assignedRegions,
+                updatedBy: req.user?.full_name || req.user?.username
+              },
+              priority: 'medium',
+              action_url: '/map',
+              action_label: 'View Map'
+            }
+          );
+          console.log(`📧 User ${userName} notified about region changes (Edit User)`);
+        } catch (notifError) {
+          console.error('Failed to send region update notification:', notifError);
+        }
+      }
     }
 
     // Fetch the updated user
@@ -508,6 +605,40 @@ const updateUser = async (req, res) => {
       updated_fields: { username, full_name, email, gender, role, phone, department, office_location, street, city, state, pincode },
       assignedRegions: assignedRegions || []
     }, req);
+
+    // Notify all admins about user update
+    try {
+      const updatedByName = req.user?.full_name || req.user?.username || 'Administrator';
+      const targetUserName = updatedUser[0]?.full_name || updatedUser[0]?.username || 'User';
+
+      let changesDescription = [];
+      if (username) changesDescription.push('username');
+      if (full_name) changesDescription.push('name');
+      if (email) changesDescription.push('email');
+      if (role) changesDescription.push('role');
+      if (assignedRegions) changesDescription.push('regions');
+
+      await notifyAllAdmins(
+        'user_activity',
+        '👤 User Updated',
+        `${updatedByName} updated ${targetUserName}'s profile. Changes: ${changesDescription.join(', ') || 'profile details'}`,
+        {
+          data: {
+            userId: id,
+            username: updatedUser[0]?.username,
+            updatedBy: updatedByName,
+            changes: changesDescription,
+            newRegions: assignedRegions
+          },
+          priority: 'low',
+          action_url: `/admin/users/${id}`,
+          action_label: 'View User'
+        }
+      );
+      console.log(`📧 Admins notified about user update: ${targetUserName}`);
+    } catch (notifError) {
+      console.error('Failed to notify admins about user update:', notifError);
+    }
 
     res.json({
       success: true,
@@ -540,16 +671,48 @@ const deleteUser = async (req, res) => {
       [id]
     );
 
+    if (users.length === 0) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    const deletedUser = users[0];
+
     await pool.query('DELETE FROM users WHERE id = ?', [id]);
 
     // Log audit
-    if (users.length > 0) {
-      await logAudit(req.user.id, 'DELETE', 'user', id, {
-        username: users[0].username,
-        email: users[0].email,
-        full_name: users[0].full_name,
-        role: users[0].role
-      }, req);
+    await logAudit(req.user.id, 'DELETE', 'user', id, {
+      username: deletedUser.username,
+      email: deletedUser.email,
+      full_name: deletedUser.full_name,
+      role: deletedUser.role
+    }, req);
+
+    // Notify all admins about user deletion
+    try {
+      const deletedByName = req.user?.full_name || req.user?.username || 'Administrator';
+      const deletedUserName = deletedUser.full_name || deletedUser.username || 'User';
+
+      await notifyAllAdmins(
+        'user_activity',
+        '🗑️ User Deleted',
+        `${deletedByName} deleted user ${deletedUserName} (${deletedUser.email}) with role: ${deletedUser.role}`,
+        {
+          data: {
+            userId: id,
+            username: deletedUser.username,
+            email: deletedUser.email,
+            fullName: deletedUser.full_name,
+            role: deletedUser.role,
+            deletedBy: deletedByName
+          },
+          priority: 'high',
+          action_url: '/admin/users',
+          action_label: 'View Users'
+        }
+      );
+      console.log(`📧 Admins notified about user deletion: ${deletedUserName}`);
+    } catch (notifError) {
+      console.error('Failed to notify admins about user deletion:', notifError);
     }
 
     res.json({ success: true, message: 'User deleted successfully' });
@@ -570,11 +733,62 @@ const activateUser = async (req, res) => {
 
     await pool.query('UPDATE users SET is_active = true WHERE id = ?', [id]);
 
+    // Get user info for notification
+    const [userInfo] = await pool.query('SELECT username, full_name FROM users WHERE id = ?', [id]);
+    const userName = userInfo[0]?.full_name || userInfo[0]?.username || 'User';
+
     // Log audit
     await logAudit(req.user.id, 'ACTIVATE', 'user', id, {
       action: 'activate',
       is_active: true
     }, req);
+
+    // Notify the user about account activation
+    try {
+      await createNotification(
+        id,
+        'user_activity',
+        '👤 Account Activated',
+        'Your account has been activated. You can now log in and access the system.',
+        {
+          data: {
+            activatedBy: req.user.id,
+            status: 'active'
+          },
+          priority: 'medium',
+          action_url: '/login',
+          action_label: 'Login'
+        }
+      );
+      console.log(`📧 User ${userName} notified about account activation`);
+    } catch (notifError) {
+      console.error('Failed to send notification to user:', notifError);
+    }
+
+    // Notify all admins about account activation
+    try {
+      const activatedByName = req.user?.full_name || req.user?.username || 'Administrator';
+
+      await notifyAllAdmins(
+        'user_activity',
+        '✅ User Account Activated',
+        `${activatedByName} activated ${userName}'s account`,
+        {
+          data: {
+            userId: id,
+            username: userInfo[0]?.username,
+            fullName: userName,
+            activatedBy: activatedByName
+          },
+          priority: 'low',
+          action_url: `/admin/users/${id}`,
+          action_label: 'View User'
+        }
+      );
+      console.log(`📧 Admins notified about account activation: ${userName}`);
+    } catch (notifError) {
+      console.error('Failed to notify admins about activation:', notifError);
+    }
 
     res.json({ success: true, message: 'User activated successfully' });
   } catch (error) {
@@ -599,11 +813,62 @@ const deactivateUser = async (req, res) => {
 
     await pool.query('UPDATE users SET is_active = false WHERE id = ?', [id]);
 
+    // Get user info for notification
+    const [userInfo] = await pool.query('SELECT username, full_name FROM users WHERE id = ?', [id]);
+    const userName = userInfo[0]?.full_name || userInfo[0]?.username || 'User';
+
     // Log audit
     await logAudit(req.user.id, 'DEACTIVATE', 'user', id, {
       action: 'deactivate',
       is_active: false
     }, req);
+
+    // Notify the user about account deactivation
+    try {
+      await createNotification(
+        id,
+        'user_activity',
+        '👤 Account Deactivated',
+        'Your account has been deactivated. Please contact an administrator if you have questions.',
+        {
+          data: {
+            deactivatedBy: req.user.id,
+            status: 'inactive'
+          },
+          priority: 'medium',
+          action_url: '/support',
+          action_label: 'Contact Support'
+        }
+      );
+      console.log(`📧 User ${userName} notified about account deactivation`);
+    } catch (notifError) {
+      console.error('Failed to send notification to user:', notifError);
+    }
+
+    // Notify all admins about account deactivation
+    try {
+      const deactivatedByName = req.user?.full_name || req.user?.username || 'Administrator';
+
+      await notifyAllAdmins(
+        'user_activity',
+        '⛔ User Account Deactivated',
+        `${deactivatedByName} deactivated ${userName}'s account`,
+        {
+          data: {
+            userId: id,
+            username: userInfo[0]?.username,
+            fullName: userName,
+            deactivatedBy: deactivatedByName
+          },
+          priority: 'medium',
+          action_url: `/admin/users/${id}`,
+          action_label: 'View User'
+        }
+      );
+      console.log(`📧 Admins notified about account deactivation: ${userName}`);
+    } catch (notifError) {
+      console.error('Failed to notify admins about deactivation:', notifError);
+    }
 
     res.json({ success: true, message: 'User deactivated successfully' });
   } catch (error) {
@@ -657,6 +922,37 @@ const assignRegion = async (req, res) => {
       [id, regionId, accessLevel, req.user.id, accessLevel, req.user.id]
     );
 
+    // Get region and user info for notification
+    const [regionInfo] = await pool.query('SELECT name FROM regions WHERE id = ?', [regionId]);
+    const [userInfo] = await pool.query('SELECT username, full_name FROM users WHERE id = ?', [id]);
+
+    const regionName = regionInfo[0]?.name || 'Unknown Region';
+    const userName = userInfo[0]?.full_name || userInfo[0]?.username || 'User';
+
+    // Notify the user about permanent region assignment
+    try {
+      await createNotification(
+        id,
+        'region_request',
+        '🗺️ Region Assigned',
+        `You have been assigned ${accessLevel} access to ${regionName}`,
+        {
+          data: {
+            regionId,
+            regionName,
+            accessLevel,
+            assignedBy: req.user.id
+          },
+          priority: 'medium',
+          action_url: '/map',
+          action_label: 'View Map'
+        }
+      );
+      console.log(`📧 User ${userName} notified about region assignment: ${regionName}`);
+    } catch (notifError) {
+      console.error('Failed to send notification to user:', notifError);
+    }
+
     res.json({ success: true, message: 'Region assigned successfully' });
   } catch (error) {
     console.error('Assign region error:', error);
@@ -673,10 +969,40 @@ const unassignRegion = async (req, res) => {
   try {
     const { id, regionId } = req.params;
 
+    // Get region and user info before deleting
+    const [regionInfo] = await pool.query('SELECT name FROM regions WHERE id = ?', [regionId]);
+    const [userInfo] = await pool.query('SELECT username, full_name FROM users WHERE id = ?', [id]);
+
     await pool.query(
       'DELETE FROM user_regions WHERE user_id = ? AND region_id = ?',
       [id, regionId]
     );
+
+    const regionName = regionInfo[0]?.name || 'Unknown Region';
+    const userName = userInfo[0]?.full_name || userInfo[0]?.username || 'User';
+
+    // Notify the user about region removal
+    try {
+      await createNotification(
+        id,
+        'region_request',
+        '🗺️ Region Removed',
+        `Your access to ${regionName} has been removed`,
+        {
+          data: {
+            regionId,
+            regionName,
+            removedBy: req.user.id
+          },
+          priority: 'medium',
+          action_url: '/regions',
+          action_label: 'View Regions'
+        }
+      );
+      console.log(`📧 User ${userName} notified about region removal: ${regionName}`);
+    } catch (notifError) {
+      console.error('Failed to send notification to user:', notifError);
+    }
 
     res.json({ success: true, message: 'Region unassigned successfully' });
   } catch (error) {
@@ -803,6 +1129,15 @@ const bulkAssignRegions = async (req, res) => {
     let affectedUsers = 0;
 
     for (const userId of user_ids) {
+      // Get existing regions before changes (for notification)
+      const [existingRegionsBefore] = await pool.query(
+        `SELECT r.name FROM regions r
+         INNER JOIN user_regions ur ON r.id = ur.region_id
+         WHERE ur.user_id = ?`,
+        [userId]
+      );
+      const oldRegionNames = existingRegionsBefore.map(r => r.name);
+
       if (action === 'replace') {
         // Remove all existing regions for this user
         await pool.query('DELETE FROM user_regions WHERE user_id = ?', [userId]);
@@ -844,6 +1179,73 @@ const bulkAssignRegions = async (req, res) => {
           );
         }
       }
+
+      // Get new regions after changes (for notification)
+      const [existingRegionsAfter] = await pool.query(
+        `SELECT r.name FROM regions r
+         INNER JOIN user_regions ur ON r.id = ur.region_id
+         WHERE ur.user_id = ?`,
+        [userId]
+      );
+      const newRegionNames = existingRegionsAfter.map(r => r.name);
+
+      // Send notification to user about bulk region changes
+      try {
+        const [userInfo] = await pool.query('SELECT username, full_name FROM users WHERE id = ?', [userId]);
+        const userName = userInfo[0]?.full_name || userInfo[0]?.username || 'User';
+
+        let notificationTitle = '';
+        let notificationMessage = '';
+
+        if (action === 'assign') {
+          const addedRegions = region_names.filter(r => !oldRegionNames.includes(r));
+          if (addedRegions.length > 0) {
+            notificationTitle = '🗺️ Regions Assigned (Bulk)';
+            notificationMessage = `New regions have been assigned to you by an administrator.\n\n`;
+            notificationMessage += `✅ Added: ${addedRegions.join(', ')}\n`;
+            notificationMessage += `\nTotal regions: ${newRegionNames.join(', ')}`;
+          }
+        } else if (action === 'replace') {
+          notificationTitle = '🗺️ Regions Replaced (Bulk)';
+          notificationMessage = `Your regions have been replaced by an administrator.\n\n`;
+          notificationMessage += `❌ Previous: ${oldRegionNames.length > 0 ? oldRegionNames.join(', ') : 'None'}\n`;
+          notificationMessage += `✅ New: ${newRegionNames.length > 0 ? newRegionNames.join(', ') : 'None'}`;
+        } else if (action === 'revoke') {
+          const removedRegions = region_names.filter(r => oldRegionNames.includes(r));
+          if (removedRegions.length > 0) {
+            notificationTitle = '🗺️ Regions Revoked (Bulk)';
+            notificationMessage = `Some regions have been revoked by an administrator.\n\n`;
+            notificationMessage += `❌ Removed: ${removedRegions.join(', ')}\n`;
+            notificationMessage += `\nRemaining regions: ${newRegionNames.length > 0 ? newRegionNames.join(', ') : 'None'}`;
+          }
+        }
+
+        if (notificationMessage) {
+          await createNotification(
+            userId,
+            'region_request',
+            notificationTitle,
+            notificationMessage,
+            {
+              data: {
+                action,
+                regions: region_names,
+                oldRegions: oldRegionNames,
+                newRegions: newRegionNames,
+                bulkOperation: true,
+                updatedBy: req.user?.full_name || req.user?.username
+              },
+              priority: 'medium',
+              action_url: '/map',
+              action_label: 'View Map'
+            }
+          );
+          console.log(`📧 User ${userName} notified about bulk region ${action}`);
+        }
+      } catch (notifError) {
+        console.error(`Failed to send bulk region notification to user ${userId}:`, notifError);
+      }
+
       affectedUsers++;
     }
 
@@ -921,6 +1323,443 @@ const resetPassword = async (req, res) => {
   }
 };
 
+/**
+ * @route   POST /api/users/:id/resend-verification
+ * @desc    Resend verification email for a user (Admin only)
+ * @access  Private (Admin/Manager)
+ */
+const resendVerificationEmail = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Get user details
+    const [users] = await pool.query(
+      'SELECT id, username, email, is_email_verified FROM users WHERE id = ?',
+      [id]
+    );
+
+    if (users.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    const user = users[0];
+
+    // Check if already verified
+    if (user.is_email_verified) {
+      return res.json({
+        success: true,
+        message: 'Email is already verified',
+        alreadyVerified: true
+      });
+    }
+
+    // Send verification email
+    try {
+      await sendVerificationEmail(user);
+      console.log(`✅ Verification email resent to ${user.email} by admin ${req.user.username}`);
+
+      // Log audit
+      await logAudit(req.user.id, 'RESEND_VERIFICATION', 'user', id, {
+        email: user.email,
+        username: user.username
+      }, req);
+
+      res.json({
+        success: true,
+        message: `Verification email sent to ${user.email}`
+      });
+    } catch (emailError) {
+      console.error('Failed to resend verification email:', emailError);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to send verification email. Please try again.'
+      });
+    }
+  } catch (error) {
+    console.error('Resend verification error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to resend verification email'
+    });
+  }
+};
+
+/**
+ * @route   POST /api/users/:id/verify-email-manual
+ * @desc    Manually verify user's email (Admin only)
+ * @access  Private (Admin/Manager)
+ */
+const manualVerifyEmail = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Get user details
+    const [users] = await pool.query(
+      'SELECT id, username, email, is_email_verified FROM users WHERE id = ?',
+      [id]
+    );
+
+    if (users.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    const user = users[0];
+
+    // Check if already verified
+    if (user.is_email_verified) {
+      return res.json({
+        success: true,
+        message: 'Email is already verified',
+        alreadyVerified: true
+      });
+    }
+
+    // Manually verify the email
+    await pool.query(
+      'UPDATE users SET is_email_verified = true, email_verified_at = NOW(), updated_at = NOW() WHERE id = ?',
+      [id]
+    );
+
+    console.log(`✅ Email manually verified for user ${user.username} (ID: ${id}) by admin ${req.user.username}`);
+
+    // Log audit
+    await logAudit(req.user.id, 'MANUAL_VERIFY_EMAIL', 'user', id, {
+      email: user.email,
+      username: user.username,
+      verified_by_admin: req.user.username
+    }, req);
+
+    res.json({
+      success: true,
+      message: `Email verified successfully for ${user.username}`
+    });
+
+  } catch (error) {
+    console.error('Manual verify email error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to verify email'
+    });
+  }
+};
+
+/**
+ * @route   GET /api/users/:id/session-stats
+ * @desc    Get user session statistics for dashboard modal
+ * @access  Private (Admin)
+ */
+const getUserSessionStats = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Get active sessions count
+    const [activeSessions] = await pool.query(
+      `SELECT COUNT(*) as count FROM user_sessions
+       WHERE user_id = ? AND is_active = TRUE AND expires_at > NOW()`,
+      [id]
+    );
+
+    // Get total actions in last 7 days from audit logs
+    const [actionCount] = await pool.query(
+      `SELECT COUNT(*) as count FROM audit_logs
+       WHERE user_id = ? AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)`,
+      [id]
+    );
+
+    // Get total time today (sum of session durations)
+    const [timeToday] = await pool.query(
+      `SELECT
+         SUM(TIMESTAMPDIFF(MINUTE, login_time,
+           CASE
+             WHEN logout_time IS NOT NULL THEN logout_time
+             WHEN is_active = TRUE THEN NOW()
+             ELSE last_activity_time
+           END
+         )) as total_minutes
+       FROM user_sessions
+       WHERE user_id = ? AND DATE(login_time) = CURDATE()`,
+      [id]
+    );
+
+    // Get current active session details
+    const [currentSession] = await pool.query(
+      `SELECT ip_address, device_info, login_time, last_activity_time
+       FROM user_sessions
+       WHERE user_id = ? AND is_active = TRUE AND expires_at > NOW()
+       ORDER BY login_time DESC
+       LIMIT 1`,
+      [id]
+    );
+
+    const totalMinutes = timeToday[0].total_minutes || 0;
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+
+    res.json({
+      success: true,
+      stats: {
+        activeSessions: activeSessions[0].count,
+        totalActions: actionCount[0].count,
+        totalTimeToday: {
+          raw: totalMinutes,
+          formatted: `${hours}h ${minutes}m`
+        },
+        currentSession: currentSession[0] || null
+      }
+    });
+
+  } catch (error) {
+    console.error('Get user session stats error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get session statistics'
+    });
+  }
+};
+
+/**
+ * @route   POST /api/users/:id/force-logout
+ * @desc    Force logout all sessions for a user (Admin only)
+ * @access  Private (Admin)
+ */
+const forceLogoutUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const adminId = req.user.id;
+
+    // Get user details
+    const [users] = await pool.query(
+      'SELECT id, username, full_name, email FROM users WHERE id = ?',
+      [id]
+    );
+
+    if (users.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    const user = users[0];
+
+    // Mark all active sessions as logged out
+    const [result] = await pool.query(
+      `UPDATE user_sessions
+       SET is_active = FALSE,
+           logout_time = NOW(),
+           logout_type = 'admin_forced'
+       WHERE user_id = ? AND is_active = TRUE`,
+      [id]
+    );
+
+    // Set user offline
+    await pool.query(
+      'UPDATE users SET is_online = FALSE WHERE id = ?',
+      [id]
+    );
+
+    // Send notification to user
+    const { createNotification } = require('./notificationController');
+    await createNotification(
+      id,
+      'security_alert',
+      '🚪 Session Terminated',
+      'Your session has been terminated by an administrator for security reasons. Please log in again if you need access.',
+      {
+        data: {
+          terminatedBy: req.user.full_name || req.user.username,
+          reason: 'Admin forced logout',
+          sessionsTerminated: result.affectedRows
+        },
+        priority: 'high',
+        action_url: '/login',
+        action_label: 'Login Again'
+      }
+    );
+
+    // Log audit
+    await logAudit(adminId, 'FORCE_LOGOUT', 'user', id, {
+      username: user.username,
+      sessions_terminated: result.affectedRows,
+      admin: req.user.username
+    }, req);
+
+    console.log(`✅ Admin ${req.user.username} forced logout ${result.affectedRows} session(s) for user ${user.username}`);
+
+    res.json({
+      success: true,
+      message: `Successfully logged out ${result.affectedRows} active session(s) for ${user.username}`,
+      sessionsTerminated: result.affectedRows
+    });
+
+  } catch (error) {
+    console.error('Force logout error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to force logout user'
+    });
+  }
+};
+
+/**
+ * @route   POST /api/admin/send-message
+ * @desc    Send message from admin to user via notification
+ * @access  Private (Admin)
+ */
+const sendAdminMessage = async (req, res) => {
+  try {
+    const { userId, message, priority = 'medium' } = req.body;
+    const adminId = req.user.id;
+
+    if (!userId || !message) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID and message are required'
+      });
+    }
+
+    // Get user details
+    const [users] = await pool.query(
+      'SELECT id, username, full_name, email FROM users WHERE id = ?',
+      [userId]
+    );
+
+    if (users.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    const user = users[0];
+
+    // Send notification
+    const { createNotification } = require('./notificationController');
+    await createNotification(
+      userId,
+      'user_activity',
+      '💬 Message from Administrator',
+      message,
+      {
+        data: {
+          from: req.user.full_name || req.user.username,
+          fromEmail: req.user.email,
+          sentAt: new Date()
+        },
+        priority: priority,
+        action_url: '/notifications',
+        action_label: 'View Messages'
+      }
+    );
+
+    // Log audit
+    await logAudit(adminId, 'SEND_MESSAGE', 'user', userId, {
+      recipient: user.username,
+      message: message,
+      priority: priority
+    }, req);
+
+    console.log(`✅ Admin ${req.user.username} sent message to user ${user.username}`);
+
+    res.json({
+      success: true,
+      message: `Message sent successfully to ${user.full_name || user.username}`
+    });
+
+  } catch (error) {
+    console.error('Send admin message error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to send message'
+    });
+  }
+};
+
+/**
+ * @route   GET /api/users/:id/recent-activity
+ * @desc    Get user's recent activity (last 10 actions)
+ * @access  Private (Admin)
+ */
+const getUserRecentActivity = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { limit = 10 } = req.query;
+
+    // Get recent activity from audit logs
+    const [activities] = await pool.query(
+      `SELECT
+         action,
+         resource_type,
+         resource_id,
+         details,
+         ip_address,
+         created_at
+       FROM audit_logs
+       WHERE user_id = ?
+       ORDER BY created_at DESC
+       LIMIT ?`,
+      [id, parseInt(limit)]
+    );
+
+    // Format activities for display
+    const formattedActivities = activities.map(activity => {
+      let description = '';
+
+      // Create human-readable descriptions
+      switch (activity.action) {
+        case 'CREATE':
+          description = `Created ${activity.resource_type} ${activity.resource_id || ''}`;
+          break;
+        case 'UPDATE':
+          description = `Updated ${activity.resource_type} ${activity.resource_id || ''}`;
+          break;
+        case 'DELETE':
+          description = `Deleted ${activity.resource_type} ${activity.resource_id || ''}`;
+          break;
+        case 'VIEW':
+          description = `Viewed ${activity.resource_type} ${activity.resource_id || ''}`;
+          break;
+        case 'LOGIN':
+          description = `Logged in from ${activity.ip_address || 'unknown IP'}`;
+          break;
+        case 'LOGOUT':
+          description = 'Logged out';
+          break;
+        default:
+          description = `${activity.action} ${activity.resource_type || ''}`;
+      }
+
+      return {
+        action: activity.action,
+        description,
+        resourceType: activity.resource_type,
+        resourceId: activity.resource_id,
+        timestamp: activity.created_at,
+        ipAddress: activity.ip_address
+      };
+    });
+
+    res.json({
+      success: true,
+      activities: formattedActivities,
+      count: formattedActivities.length
+    });
+
+  } catch (error) {
+    console.error('Get user recent activity error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get user activity'
+    });
+  }
+};
+
 module.exports = {
   getAllUsers,
   getUserById,
@@ -935,5 +1774,11 @@ module.exports = {
   bulkDeleteUsers,
   bulkUpdateStatus,
   bulkAssignRegions,
-  resetPassword
+  resetPassword,
+  resendVerificationEmail,
+  manualVerifyEmail,
+  getUserSessionStats,
+  forceLogoutUser,
+  sendAdminMessage,
+  getUserRecentActivity
 };

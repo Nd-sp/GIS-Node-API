@@ -1,4 +1,5 @@
 const { pool } = require('../config/database');
+const { createNotification } = require('../controllers/notificationController');
 
 /**
  * Clean up expired temporary access
@@ -93,17 +94,118 @@ const cleanupExpiredTemporaryAccess = async () => {
 };
 
 /**
+ * Check for temporary access expiring soon and send notifications
+ * Notifies users 24 hours before their temporary access expires
+ */
+const notifyExpiringTemporaryAccess = async () => {
+  try {
+    console.log('⏰ Checking for temporary access expiring soon...');
+
+    // Find temporary access that expires in the next 24-25 hours
+    // We use a 1-hour window to avoid sending duplicate notifications
+    const [expiringAccess] = await pool.query(
+      `SELECT ta.id, ta.user_id, ta.resource_id, ta.expires_at,
+              r.name as region_name, u.username, u.full_name,
+              TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(), ta.expires_at) as hours_remaining
+       FROM temporary_access ta
+       INNER JOIN regions r ON ta.resource_id = r.id AND ta.resource_type = 'region'
+       INNER JOIN users u ON ta.user_id = u.id
+       WHERE ta.revoked_at IS NULL
+         AND ta.expires_at > UTC_TIMESTAMP()
+         AND TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(), ta.expires_at) BETWEEN 23 AND 25`
+    );
+
+    if (expiringAccess.length === 0) {
+      console.log('✅ No temporary access expiring in the next 24 hours');
+      return { notifiedCount: 0 };
+    }
+
+    console.log(`⏰ Found ${expiringAccess.length} temporary access grant(s) expiring soon`);
+
+    let notifiedCount = 0;
+
+    for (const access of expiringAccess) {
+      const { user_id, region_name, expires_at, full_name, hours_remaining } = access;
+
+      try {
+        // Check if we already sent a notification for this grant
+        const [existingNotif] = await pool.query(
+          `SELECT id FROM notifications
+           WHERE user_id = ? AND type = 'region_request'
+           AND title = '⏰ Temporary Access Expiring Soon'
+           AND JSON_EXTRACT(data, '$.grantId') = ?
+           AND created_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL 2 DAY)`,
+          [user_id, access.id]
+        );
+
+        if (existingNotif.length > 0) {
+          console.log(`  ⏭️  Already notified ${full_name} about ${region_name} expiring`);
+          continue;
+        }
+
+        const expiryDate = new Date(expires_at);
+        const expiryDisplay = expiryDate.toLocaleString('en-US', {
+          dateStyle: 'medium',
+          timeStyle: 'short'
+        });
+
+        await createNotification(
+          user_id,
+          'region_request',
+          '⏰ Temporary Access Expiring Soon',
+          `Your temporary access to ${region_name} will expire in approximately ${hours_remaining} hours (${expiryDisplay})`,
+          {
+            data: {
+              grantId: access.id,
+              regionId: access.resource_id,
+              regionName: region_name,
+              expiresAt: expires_at,
+              hoursRemaining: hours_remaining
+            },
+            priority: 'medium',
+            action_url: '/temporary-access',
+            action_label: 'View Access',
+            expires_at: expires_at
+          }
+        );
+
+        console.log(`  ✅ Notified ${full_name} about ${region_name} expiring in ${hours_remaining}h`);
+        notifiedCount++;
+      } catch (notifError) {
+        console.error(`  ❌ Failed to notify user ${user_id}:`, notifError);
+      }
+    }
+
+    console.log(`⏰ Notification complete: Notified ${notifiedCount} user(s) about expiring access`);
+
+    return {
+      notifiedCount,
+      totalExpiring: expiringAccess.length
+    };
+  } catch (error) {
+    console.error('❌ Error notifying about expiring temporary access:', error);
+    throw error;
+  }
+};
+
+/**
  * Start the cleanup scheduler
- * Runs cleanup every 5 minutes
+ * Runs cleanup every 5 minutes and expiring notifications every hour
  */
 const startCleanupScheduler = () => {
   const CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes in milliseconds
+  const NOTIFICATION_INTERVAL = 60 * 60 * 1000; // 1 hour in milliseconds
 
   console.log('🕒 Starting temporary access cleanup scheduler (runs every 5 minutes)');
+  console.log('🕒 Starting temporary access expiration notification scheduler (runs every hour)');
 
   // Run immediately on startup
   cleanupExpiredTemporaryAccess().catch(error => {
     console.error('Initial cleanup failed:', error);
+  });
+
+  notifyExpiringTemporaryAccess().catch(error => {
+    console.error('Initial notification check failed:', error);
   });
 
   // Schedule recurring cleanup
@@ -114,9 +216,19 @@ const startCleanupScheduler = () => {
       console.error('Scheduled cleanup failed:', error);
     }
   }, CLEANUP_INTERVAL);
+
+  // Schedule recurring expiration notifications
+  setInterval(async () => {
+    try {
+      await notifyExpiringTemporaryAccess();
+    } catch (error) {
+      console.error('Scheduled notification check failed:', error);
+    }
+  }, NOTIFICATION_INTERVAL);
 };
 
 module.exports = {
   cleanupExpiredTemporaryAccess,
+  notifyExpiringTemporaryAccess,
   startCleanupScheduler
 };

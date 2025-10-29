@@ -14,8 +14,16 @@ const {
   bulkDeleteUsers,
   bulkUpdateStatus,
   bulkAssignRegions,
-  resetPassword
+  resetPassword,
+  getUserSessionStats,
+  forceLogoutUser,
+  sendAdminMessage,
+  getUserRecentActivity
 } = require('../controllers/userController');
+const {
+  manualVerifyUserEmail,
+  adminResendVerificationEmail
+} = require('../controllers/authController');
 const { authenticate, authorize } = require('../middleware/auth');
 
 // All routes require authentication
@@ -42,6 +50,9 @@ router.patch('/bulk-status', authorize('admin'), bulkUpdateStatus);
 // POST /api/users/bulk-assign-regions - Bulk assign regions to users (must be BEFORE /:id route)
 router.post('/bulk-assign-regions', authorize('admin'), bulkAssignRegions);
 
+// POST /api/admin/send-message - Send message from admin to user
+router.post('/admin/send-message', authorize('admin'), sendAdminMessage);
+
 // DELETE /api/users/:id - Delete user
 router.delete('/:id', authorize('admin'), deleteUser);
 
@@ -54,6 +65,12 @@ router.patch('/:id/deactivate', authorize('admin'), deactivateUser);
 // POST /api/users/:id/reset-password - Reset user password
 router.post('/:id/reset-password', authorize('admin', 'manager'), resetPassword);
 
+// PATCH /api/users/:userId/verify-email - Manually verify user's email (Admin only)
+router.patch('/:userId/verify-email', authorize('admin'), manualVerifyUserEmail);
+
+// POST /api/users/:userId/resend-verification - Resend verification email (Admin only)
+router.post('/:userId/resend-verification', authorize('admin'), adminResendVerificationEmail);
+
 // GET /api/users/:id/regions - Get user regions
 router.get('/:id/regions', getUserRegions);
 
@@ -62,5 +79,14 @@ router.post('/:id/regions', authorize('admin'), assignRegion);
 
 // DELETE /api/users/:id/regions/:regionId - Unassign region
 router.delete('/:id/regions/:regionId', authorize('admin'), unassignRegion);
+
+// GET /api/users/:id/session-stats - Get user session statistics
+router.get('/:id/session-stats', authorize('admin'), getUserSessionStats);
+
+// POST /api/users/:id/force-logout - Force logout user (Admin only)
+router.post('/:id/force-logout', authorize('admin'), forceLogoutUser);
+
+// GET /api/users/:id/recent-activity - Get user recent activity
+router.get('/:id/recent-activity', authorize('admin'), getUserRecentActivity);
 
 module.exports = router;

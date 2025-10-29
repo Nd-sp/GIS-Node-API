@@ -1,6 +1,7 @@
 const { pool } = require('../config/database');
 const { cleanupExpiredTemporaryAccess } = require('../utils/temporaryAccessCleanup');
 const { logAudit } = require('./auditController');
+const { createNotification } = require('./notificationController');
 
 /**
  * Calculate human-readable time remaining
@@ -249,6 +250,40 @@ const grantTemporaryAccess = async (req, res) => {
       // Continue even if audit log fails
     }
 
+    // Notify the user about temporary access granted
+    try {
+      const expiryDate = new Date(expires_at);
+      const expiryDisplay = expiryDate.toLocaleString('en-US', {
+        dateStyle: 'medium',
+        timeStyle: 'short'
+      });
+
+      await createNotification(
+        user_id,
+        'region_request',
+        '🔓 Temporary Access Granted',
+        `You have been granted temporary ${access_level || 'read'} access to ${region_name} until ${expiryDisplay}`,
+        {
+          data: {
+            grantId: result.insertId,
+            regionId,
+            regionName: region_name,
+            accessLevel: access_level || 'read',
+            expiresAt: expires_at,
+            reason
+          },
+          priority: 'high',
+          action_url: '/map',
+          action_label: 'View Map',
+          expires_at: mysqlDateTime
+        }
+      );
+      console.log(`📧 User ${users[0].full_name} notified about temporary access grant`);
+    } catch (notifError) {
+      console.error('Failed to send notification to user:', notifError);
+      // Don't fail the request if notification fails
+    }
+
     res.status(201).json({
       success: true,
       grant: {
@@ -346,6 +381,31 @@ const revokeTemporaryAccess = async (req, res) => {
     } catch (auditError) {
       console.error('Failed to create audit log for revocation:', auditError);
       // Continue even if audit log fails
+    }
+
+    // Notify the user about temporary access revoked
+    try {
+      await createNotification(
+        grantUserId,
+        'region_request',
+        '🔒 Temporary Access Revoked',
+        `Your temporary access to ${regionName} has been revoked`,
+        {
+          data: {
+            grantId: id,
+            regionId: grantResourceId,
+            regionName,
+            revokedBy: userId
+          },
+          priority: 'high',
+          action_url: '/temporary-access',
+          action_label: 'View Access'
+        }
+      );
+      console.log(`📧 User ${targetUser.full_name} notified about temporary access revocation`);
+    } catch (notifError) {
+      console.error('Failed to send notification to user:', notifError);
+      // Don't fail the request if notification fails
     }
 
     // Remove from user_regions table (only if no other active temporary access exists)

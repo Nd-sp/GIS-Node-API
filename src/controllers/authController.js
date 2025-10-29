@@ -2,6 +2,7 @@ const { pool } = require('../config/database');
 const { hashPassword, comparePassword } = require('../utils/bcrypt');
 const { generateToken, generateRefreshToken, verifyEmailToken } = require('../utils/jwt');
 const { sendVerificationEmail } = require('../services/emailService');
+const { notifyAllAdmins } = require('./notificationController');
 
 /**
  * @route   POST /api/auth/login
@@ -48,6 +49,7 @@ const login = async (req, res) => {
     const [users] = await pool.query(query, params);
 
     if (users.length === 0) {
+      console.log('❌ Login failed: User not found');
       return res.status(401).json({
         success: false,
         error: 'Invalid credentials'
@@ -55,24 +57,41 @@ const login = async (req, res) => {
     }
 
     const user = users[0];
+    console.log(`✅ User found: ${user.username} (ID: ${user.id})`);
 
     // Check if user is active
     if (!user.is_active) {
+      console.log('❌ Login failed: Account deactivated');
       return res.status(401).json({
         success: false,
         error: 'Account is deactivated. Please contact administrator.'
       });
     }
 
+    // Check if email is verified
+    if (!user.is_email_verified) {
+      console.log('❌ Login failed: Email not verified');
+      return res.status(401).json({
+        success: false,
+        error: 'Please verify your email address before logging in. Check your email for the verification link.',
+        emailNotVerified: true,
+        email: user.email
+      });
+    }
+
     // Compare password
+    console.log('🔐 Comparing passwords...');
     const isPasswordValid = await comparePassword(password, user.password_hash);
 
     if (!isPasswordValid) {
+      console.log('❌ Login failed: Invalid password');
       return res.status(401).json({
         success: false,
         error: 'Invalid email or password'
       });
     }
+
+    console.log('✅ Password valid, login successful');
 
     // Update last login time and set online status
     await pool.query(
@@ -99,6 +118,28 @@ const login = async (req, res) => {
     const refreshToken = generateRefreshToken({
       id: user.id
     });
+
+    // Create session record for tracking
+    try {
+      const crypto = require('crypto');
+      const sessionToken = crypto.createHash('sha256').update(token).digest('hex');
+      const deviceInfo = req.get('User-Agent') || 'Unknown Device';
+      const ipAddress = req.ip || req.connection.remoteAddress;
+
+      // Calculate expiration (7 days for refresh token)
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 7);
+
+      await pool.query(
+        `INSERT INTO user_sessions (session_token, user_id, ip_address, device_info, expires_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        [sessionToken, user.id, ipAddress, deviceInfo, expiresAt]
+      );
+      console.log(`✅ Session created for user ${user.username}`);
+    } catch (sessionError) {
+      console.error('Failed to create session record:', sessionError);
+      // Don't fail login if session tracking fails
+    }
 
     // Map regions to just names for frontend
     const assignedRegions = regions.map(r => r.name);
@@ -208,12 +249,41 @@ const register = async (req, res) => {
       await sendVerificationEmail({
         id: userId,
         email,
-        username
+        username,
+        full_name,
+        role,
+        password // Send plain password before it's hashed
       });
       console.log(`✅ Verification email sent to ${email}`);
     } catch (emailError) {
       console.error('Failed to send verification email:', emailError);
       // Continue with registration even if email fails
+    }
+
+    // Notify all admins about new user registration
+    try {
+      await notifyAllAdmins(
+        'user_activity',
+        '👤 New User Registered',
+        `${full_name} (${username}) has registered with email ${email}`,
+        {
+          data: {
+            userId,
+            username,
+            email,
+            fullName: full_name,
+            role,
+            emailVerified: false
+          },
+          priority: 'low',
+          action_url: `/admin/users/${userId}`,
+          action_label: 'View User'
+        }
+      );
+      console.log(`📧 Admins notified about new user registration: ${username}`);
+    } catch (notifError) {
+      console.error('Failed to send notification to admins:', notifError);
+      // Don't fail registration if notification fails
     }
 
     // Generate token (user can still login, but should verify email)
@@ -407,6 +477,7 @@ const changePassword = async (req, res) => {
 const logout = async (req, res) => {
   try {
     const userId = req.user?.id;
+    const token = req.headers.authorization?.replace('Bearer ', '');
 
     if (userId) {
       // Set user offline status
@@ -415,6 +486,26 @@ const logout = async (req, res) => {
         [userId]
       );
       console.log(`🚪 User ${userId} logged out - set to offline`);
+
+      // Mark session as logged out
+      if (token) {
+        try {
+          const crypto = require('crypto');
+          const sessionToken = crypto.createHash('sha256').update(token).digest('hex');
+
+          await pool.query(
+            `UPDATE user_sessions
+             SET is_active = FALSE,
+                 logout_time = NOW(),
+                 logout_type = 'user'
+             WHERE session_token = ? AND user_id = ?`,
+            [sessionToken, userId]
+          );
+          console.log(`✅ Session marked as logged out for user ${userId}`);
+        } catch (sessionError) {
+          console.error('Failed to update session:', sessionError);
+        }
+      }
     }
 
     res.json({
@@ -440,7 +531,13 @@ const verifyEmail = async (req, res) => {
   try {
     const { token } = req.params;
 
+    console.log('\n🔔 EMAIL VERIFICATION REQUEST RECEIVED');
+    console.log('   Token (first 50 chars):', token ? token.substring(0, 50) + '...' : 'NO TOKEN');
+    console.log('   Request URL:', req.originalUrl);
+    console.log('   Request Method:', req.method);
+
     if (!token) {
+      console.log('❌ No token provided');
       return res.status(400).json({
         success: false,
         error: 'Verification token is required'
@@ -483,12 +580,13 @@ const verifyEmail = async (req, res) => {
     }
 
     // Update user's email verification status
+    console.log(`📝 Updating database for user ID: ${decoded.id}`);
     await pool.query(
-      'UPDATE users SET is_email_verified = true, updated_at = NOW() WHERE id = ?',
+      'UPDATE users SET is_email_verified = true, email_verified_at = NOW(), updated_at = NOW() WHERE id = ?',
       [decoded.id]
     );
 
-    console.log(`✅ Email verified for user ID: ${decoded.id}`);
+    console.log(`✅ Email verified successfully for user ID: ${decoded.id}, email: ${decoded.email}`);
 
     res.json({
       success: true,
@@ -523,7 +621,7 @@ const resendVerificationEmail = async (req, res) => {
 
     // Find user by email
     const [users] = await pool.query(
-      'SELECT id, username, email, is_email_verified FROM users WHERE email = ?',
+      'SELECT id, username, email, full_name, role, is_email_verified FROM users WHERE email = ?',
       [email]
     );
 
@@ -571,6 +669,226 @@ const resendVerificationEmail = async (req, res) => {
   }
 };
 
+/**
+ * @route   PATCH /api/users/:userId/verify-email
+ * @desc    Manually verify user's email (Admin only)
+ * @access  Private/Admin
+ */
+const manualVerifyUserEmail = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const adminId = req.user.id; // ID of admin performing the action
+
+    console.log(`\n🔒 MANUAL EMAIL VERIFICATION REQUEST`);
+    console.log(`   Admin ID: ${adminId}`);
+    console.log(`   Target User ID: ${userId}`);
+
+    // Get target user
+    const [users] = await pool.query(
+      'SELECT id, email, full_name, is_email_verified FROM users WHERE id = ?',
+      [userId]
+    );
+
+    if (users.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    const user = users[0];
+
+    // Check if already verified
+    if (user.is_email_verified) {
+      return res.status(400).json({
+        success: false,
+        error: 'User email is already verified'
+      });
+    }
+
+    // Update user as verified
+    await pool.query(
+      `UPDATE users
+       SET is_email_verified = TRUE,
+           email_verified_at = NOW(),
+           manual_verification = TRUE,
+           email_verified_by = ?
+       WHERE id = ?`,
+      [adminId, userId]
+    );
+
+    console.log(`✅ Email manually verified for user ${userId} by admin ${adminId}`);
+
+    // Send notification email to user
+    try {
+      const { sendManualVerificationNotification } = require('../services/emailService');
+      await sendManualVerificationNotification(user.email, user.full_name);
+      console.log(`📧 Manual verification notification sent to ${user.email}`);
+    } catch (emailError) {
+      console.error('❌ Failed to send notification email:', emailError.message);
+      // Don't fail the request if email fails
+    }
+
+    // Get admin details for audit log
+    const [adminUsers] = await pool.query(
+      'SELECT full_name FROM users WHERE id = ?',
+      [adminId]
+    );
+    const adminName = adminUsers[0]?.full_name || 'Unknown Admin';
+
+    res.json({
+      success: true,
+      message: 'User email verified successfully',
+      user: {
+        id: user.id,
+        email: user.email,
+        full_name: user.full_name,
+        is_email_verified: true,
+        email_verified_at: new Date(),
+        verified_by: adminName
+      }
+    });
+  } catch (error) {
+    console.error('❌ Manual verification error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to verify user email',
+      details: error.message
+    });
+  }
+};
+
+/**
+ * @route   POST /api/users/:userId/resend-verification
+ * @desc    Resend verification email to user (Admin only)
+ * @access  Private/Admin
+ */
+const adminResendVerificationEmail = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const adminId = req.user.id;
+
+    console.log(`\n📧 ADMIN RESEND VERIFICATION REQUEST`);
+    console.log(`   Admin ID: ${adminId}`);
+    console.log(`   Target User ID: ${userId}`);
+
+    // Get target user
+    const [users] = await pool.query(
+      'SELECT id, username, email, full_name, role, is_email_verified FROM users WHERE id = ?',
+      [userId]
+    );
+
+    if (users.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    const user = users[0];
+
+    // Check if user has a valid email
+    if (!user.email || user.email.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        error: 'User does not have a valid email address'
+      });
+    }
+
+    // Check if already verified
+    if (user.is_email_verified) {
+      return res.status(400).json({
+        success: false,
+        error: 'User email is already verified'
+      });
+    }
+
+    // Update last verification email sent timestamp
+    await pool.query(
+      'UPDATE users SET last_verification_email_sent = NOW() WHERE id = ?',
+      [userId]
+    );
+
+    // Send verification email
+    await sendVerificationEmail({
+      id: user.id,
+      email: user.email,
+      username: user.username,
+      full_name: user.full_name,
+      role: user.role
+    });
+
+    console.log(`✅ Verification email resent to ${user.email} by admin ${adminId}`);
+
+    res.json({
+      success: true,
+      message: `Verification email sent to ${user.email}`,
+      user: {
+        id: user.id,
+        email: user.email,
+        full_name: user.full_name
+      }
+    });
+  } catch (error) {
+    console.error('❌ Admin resend verification error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to resend verification email',
+      details: error.message
+    });
+  }
+};
+
+/**
+ * @route   GET /api/auth/validate-session
+ * @desc    Validate if current session is still active
+ * @access  Private
+ */
+const validateSession = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const username = req.user.username;
+
+    console.log(`🔍 [Validate Session] Checking for user: ${username} (ID: ${userId})`);
+
+    // Check if user has any active sessions
+    const [sessions] = await pool.query(
+      'SELECT id, login_time, last_activity_time FROM user_sessions WHERE user_id = ? AND is_active = TRUE LIMIT 1',
+      [userId]
+    );
+
+    console.log(`📊 [Validate Session] Active sessions found: ${sessions.length}`);
+
+    if (sessions.length === 0) {
+      console.log(`❌ [Validate Session] NO ACTIVE SESSIONS - Returning session terminated for user: ${username}`);
+      return res.status(401).json({
+        success: false,
+        valid: false,
+        error: 'Session has been terminated',
+        sessionTerminated: true
+      });
+    }
+
+    console.log(`✅ [Validate Session] Session valid for user: ${username}`);
+    // Session is valid
+    res.json({
+      success: true,
+      valid: true,
+      session: {
+        loginTime: sessions[0].login_time,
+        lastActivity: sessions[0].last_activity_time
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ [Validate Session] Error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to validate session'
+    });
+  }
+};
+
 module.exports = {
   login,
   register,
@@ -578,5 +896,8 @@ module.exports = {
   changePassword,
   logout,
   verifyEmail,
-  resendVerificationEmail
+  resendVerificationEmail,
+  manualVerifyUserEmail,
+  adminResendVerificationEmail,
+  validateSession
 };

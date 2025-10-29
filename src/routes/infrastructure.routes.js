@@ -12,7 +12,9 @@ const {
   saveImportedItems,
   deleteImportSession,
   getInfrastructureStats,
-  getCategories
+  getCategories,
+  getMapViewInfrastructure,
+  getClusters
 } = require("../controllers/infrastructureController");
 const {
   getInfrastructureAuditLogs,
@@ -33,6 +35,10 @@ router.get("/stats", getInfrastructureStats);
 
 // Categories endpoint (before :id route to avoid conflicts)
 router.get("/categories", getCategories);
+
+// Map view endpoints (before :id route to avoid conflicts)
+router.get("/map-view", getMapViewInfrastructure);
+router.get("/clusters", getClusters);
 
 // Audit endpoints (before :id route to avoid conflicts)
 router.get("/audit", authorize("admin", "Admin"), getInfrastructureAuditLogs);
