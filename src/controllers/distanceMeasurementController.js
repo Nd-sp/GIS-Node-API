@@ -104,7 +104,20 @@ const getMeasurementById = async (req, res) => {
 const createMeasurement = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { measurement_name, points, total_distance, unit, region_id, notes, is_saved } = req.body;
+    const {
+      measurement_name,
+      points,
+      total_distance,
+      unit,
+      region_id,
+      notes,
+      is_saved,
+      elevation_data,
+      min_elevation,
+      max_elevation,
+      elevation_gain,
+      elevation_loss
+    } = req.body;
 
     if (!points || !total_distance) {
       return res.status(400).json({ success: false, error: 'Points and distance required' });
@@ -112,9 +125,24 @@ const createMeasurement = async (req, res) => {
 
     const [result] = await pool.query(
       `INSERT INTO distance_measurements
-       (user_id, region_id, measurement_name, points, total_distance, unit, notes, is_saved)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [userId, region_id, measurement_name, JSON.stringify(points), total_distance, unit || 'kilometers', notes, is_saved || false]
+       (user_id, region_id, measurement_name, points, total_distance, unit, notes, is_saved,
+        elevation_data, min_elevation, max_elevation, elevation_gain, elevation_loss)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        userId,
+        region_id,
+        measurement_name,
+        JSON.stringify(points),
+        total_distance,
+        unit || 'kilometers',
+        notes,
+        is_saved || false,
+        elevation_data ? JSON.stringify(elevation_data) : null,
+        min_elevation || null,
+        max_elevation || null,
+        elevation_gain || null,
+        elevation_loss || null
+      ]
     );
 
     // Log audit
@@ -122,7 +150,8 @@ const createMeasurement = async (req, res) => {
       measurement_name,
       total_distance,
       unit: unit || 'kilometers',
-      points_count: points?.length || 0
+      points_count: points?.length || 0,
+      has_elevation_data: !!elevation_data
     }, req);
 
     res.status(201).json({
@@ -131,7 +160,10 @@ const createMeasurement = async (req, res) => {
         id: result.insertId,
         measurement_name,
         total_distance,
-        unit: unit || 'kilometers'
+        unit: unit || 'kilometers',
+        min_elevation,
+        max_elevation,
+        elevation_gain
       }
     });
   } catch (error) {

@@ -50,18 +50,22 @@ const limiter = rateLimit({
   skip: (req) => {
     // Skip rate limiting for critical endpoints to prevent blocking during initial page load
     const skipPaths = [
-      '/auth/',
-      '/temporary-access/my-access',
+      '/auth',
+      '/temporary-access',
       '/users',
       '/datahub',
-      '/measurements/',
-      '/drawings/',
-      '/rf/',
+      '/measurements',
+      '/drawings',
+      '/rf',
       '/elevation',
-      '/infrastructure/',
-      '/analytics/'
+      '/infrastructure',
+      '/analytics',
+      '/notifications',
+      '/regions',
+      '/search'
     ];
-    return skipPaths.some(path => req.path.includes(path));
+    // Check if request path starts with any skip path
+    return skipPaths.some(path => req.path.startsWith(path));
   }
 });
 app.use("/api/", limiter);
@@ -155,6 +159,10 @@ try {
   // Elevation Profile routes
   const elevationRoutes = require("./src/routes/elevationProfile.routes");
   app.use("/api/elevation", elevationRoutes);
+
+  // Building Cache routes (for LOS analysis)
+  const buildingCacheRoutes = require("./src/routes/buildingCache.routes");
+  app.use("/api/building-cache", buildingCacheRoutes);
 
   // Infrastructure routes
   const infrastructureRoutes = require("./src/routes/infrastructure.routes");

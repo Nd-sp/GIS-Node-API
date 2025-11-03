@@ -210,6 +210,7 @@ const getAllInfrastructure = async (req, res) => {
         console.log("🏗️ Admin/Manager viewing all data (no filter specified)");
       } else {
         // Regular users see only their data or data from assigned regions
+        // Also include infrastructure with NULL region_id if user has ANY region access
         const userFilterClause = ` AND (
           i.user_id = ?
           OR i.region_id IN (
@@ -219,10 +220,20 @@ const getAllInfrastructure = async (req, res) => {
             WHERE user_id = ? AND resource_type = 'region'
             AND expires_at > NOW() AND revoked_at IS NULL
           )
+          OR (
+            i.region_id IS NULL
+            AND EXISTS (
+              SELECT 1 FROM user_regions WHERE user_id = ?
+              UNION
+              SELECT 1 FROM temporary_access
+              WHERE user_id = ? AND resource_type = 'region'
+              AND expires_at > NOW() AND revoked_at IS NULL
+            )
+          )
         )`;
         roleFilterClause.push(userFilterClause);
-        params.push(userId, userId, userId);
-        console.log("🏗️ Regular user viewing own data");
+        params.push(userId, userId, userId, userId, userId);
+        console.log("🏗️ Regular user viewing own data + region data + unassigned infrastructure");
       }
     }
 
@@ -1188,8 +1199,18 @@ const getInfrastructureStats = async (req, res) => {
           WHERE user_id = ? AND resource_type = 'region'
           AND expires_at > NOW() AND revoked_at IS NULL
         )
+        OR (
+          region_id IS NULL
+          AND EXISTS (
+            SELECT 1 FROM user_regions WHERE user_id = ?
+            UNION
+            SELECT 1 FROM temporary_access
+            WHERE user_id = ? AND resource_type = 'region'
+            AND expires_at > NOW() AND revoked_at IS NULL
+          )
+        )
       )`;
-      params.push(userId, userId, userId);
+      params.push(userId, userId, userId, userId, userId);
     }
 
     const [stats] = await pool.query(

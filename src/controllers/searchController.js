@@ -32,7 +32,8 @@ const globalSearch = async (req, res) => {
 
     // Search in measurements
     const [measurements] = await pool.query(
-      `SELECT id, measurement_name, total_distance
+      `SELECT id, measurement_name, total_distance, points,
+              elevation_data, max_elevation, min_elevation, elevation_gain, elevation_loss
        FROM distance_measurements
        WHERE user_id = ? AND measurement_name LIKE ?
        LIMIT 10`,
@@ -247,7 +248,9 @@ const searchSavedData = async (req, res) => {
 
     // Search Distance Measurements
     const [measurements] = await pool.query(
-      `SELECT id, measurement_name as name, total_distance, points, created_at, user_id
+      `SELECT id, measurement_name as name, total_distance, points,
+              elevation_data, max_elevation, min_elevation, elevation_gain, elevation_loss,
+              created_at, user_id
        FROM distance_measurements
        WHERE user_id = ? AND measurement_name LIKE ?
        ORDER BY created_at DESC

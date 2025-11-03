@@ -111,8 +111,27 @@ const createProfile = async (req, res) => {
       elevation_loss,
       region_id,
       notes,
-      is_saved
+      is_saved,
+      points, // Multi-point waypoints
+      // 🆕 LOS Analysis fields
+      building_data,
+      obstacle_data,
+      los_analysis,
+      antenna_height_1,
+      antenna_height_2,
+      rf_frequency
     } = req.body;
+
+    // 🔍 DEBUG: Log received data
+    console.log('🔍 DEBUG: Received elevation profile data:', {
+      profile_name,
+      points_count: points ? points.length : 0,
+      has_elevation_data: !!elevation_data,
+      has_building_data: !!building_data,
+      has_los_analysis: !!los_analysis,
+      antenna_heights: [antenna_height_1, antenna_height_2],
+      rf_frequency
+    });
 
     if (!start_point || !end_point) {
       return res.status(400).json({
@@ -125,8 +144,9 @@ const createProfile = async (req, res) => {
       `INSERT INTO elevation_profiles
        (user_id, region_id, profile_name, start_point, end_point, elevation_data,
         total_distance, min_elevation, max_elevation, elevation_gain, elevation_loss,
-        notes, is_saved)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        notes, is_saved, points, building_data, obstacle_data, los_analysis,
+        antenna_height_1, antenna_height_2, rf_frequency)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         userId,
         region_id,
@@ -140,9 +160,25 @@ const createProfile = async (req, res) => {
         elevation_gain,
         elevation_loss,
         notes,
-        is_saved || false
+        is_saved || false,
+        points ? JSON.stringify(points) : null,
+        building_data ? JSON.stringify(building_data) : null,
+        obstacle_data ? JSON.stringify(obstacle_data) : null,
+        los_analysis ? JSON.stringify(los_analysis) : null,
+        antenna_height_1 || 30.00,
+        antenna_height_2 || 30.00,
+        rf_frequency || 2400.00
       ]
     );
+
+    // 🔍 DEBUG: Log saved data
+    console.log('✅ DEBUG: Elevation profile saved to database:', {
+      id: result.insertId,
+      profile_name,
+      points_saved: !!points,
+      los_analysis_saved: !!los_analysis,
+      buildings_count: building_data ? building_data.buildings?.length : 0
+    });
 
     // Log audit
     await logAudit(userId, 'CREATE', 'elevation_profile', result.insertId, {
@@ -150,7 +186,8 @@ const createProfile = async (req, res) => {
       total_distance,
       min_elevation,
       max_elevation,
-      elevation_gain
+      elevation_gain,
+      has_los_analysis: !!los_analysis
     }, req);
 
     res.status(201).json({
@@ -159,7 +196,11 @@ const createProfile = async (req, res) => {
         id: result.insertId,
         profile_name,
         total_distance,
-        elevation_gain
+        elevation_gain,
+        los_analysis: los_analysis ? {
+          isClear: los_analysis.isClear,
+          clearancePercentage: los_analysis.clearancePercentage
+        } : null
       }
     });
   } catch (error) {
