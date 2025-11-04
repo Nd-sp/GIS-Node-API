@@ -40,6 +40,13 @@ if (process.env.NODE_ENV === "development") {
 const { performanceMiddleware } = require("./src/middleware/performanceTracking");
 app.use(performanceMiddleware);
 
+// 🚀 COMPRESSION MIDDLEWARE - Reduces response size by 70-80%
+const compressionMiddleware = require("./src/middleware/compression");
+app.use(compressionMiddleware);
+
+// 🚀 CACHE UTILITIES - For clearing cache after mutations
+const { getCacheStats, clearAllCache } = require("./src/middleware/cache");
+
 // Rate limiting - Industry standard (more permissive for development)
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 60000, // 1 minute (reduced window)
@@ -116,6 +123,24 @@ app.get("/api/health", async (req, res) => {
       error: error.message
     });
   }
+});
+
+// 🚀 CACHE STATS ENDPOINT - Monitor cache performance
+app.get("/api/cache/stats", (req, res) => {
+  const stats = getCacheStats();
+  res.json({
+    success: true,
+    cache: stats
+  });
+});
+
+// 🚀 CLEAR CACHE ENDPOINT - Clear all cache (admin only in production)
+app.post("/api/cache/clear", (req, res) => {
+  clearAllCache();
+  res.json({
+    success: true,
+    message: "All cache cleared successfully"
+  });
 });
 
 // Import and use routes

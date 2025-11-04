@@ -678,8 +678,14 @@ const deleteInfrastructure = async (req, res) => {
 
 /**
  * @route   POST /api/infrastructure/import/kml
- * @desc    Import KML file and save to temporary import table
- * @access  Private (Admin/Manager)
+ * @desc    Import KML file and save to temporary import table (OPTION B: Save button workflow)
+ * @access  Private (ALL USERS - Admin/Manager/Technician/User)
+ *
+ * NEW WORKFLOW:
+ * 1. All users can import KML data (stored temporarily)
+ * 2. Users see imported data on their map immediately
+ * 3. Users can click "Save" to make data permanent and visible to all users in region
+ * 4. Unsaved data is only visible to the user who imported it
  */
 const importKML = async (req, res) => {
   try {
@@ -696,14 +702,8 @@ const importKML = async (req, res) => {
       filename
     });
 
-    // Only admin/manager can import
-    if (userRole !== "admin" && userRole !== "manager") {
-      console.error("❌ Import rejected: User role not authorized");
-      return res.status(403).json({
-        success: false,
-        error: "Only admin/manager can import KML files"
-      });
-    }
+    // ✅ NEW: All authenticated users can import KML
+    console.log("✅ KML import allowed for user:", userId, "Role:", userRole);
 
     if (!kmlData) {
       console.error("❌ Import rejected: No KML data provided");
@@ -949,17 +949,13 @@ const importKML = async (req, res) => {
 /**
  * @route   GET /api/infrastructure/import/:sessionId/preview
  * @desc    Get preview of imported items
- * @access  Private (Admin/Manager)
+ * @access  Private (ALL USERS)
  */
 const getImportPreview = async (req, res) => {
   try {
     const { sessionId } = req.params;
     const userId = req.user.id;
     const userRole = req.user.role;
-
-    if (userRole !== "admin" && userRole !== "manager") {
-      return res.status(403).json({ success: false, error: "Access denied" });
-    }
 
     const [items] = await pool.query(
       `SELECT
@@ -1010,8 +1006,13 @@ const getImportPreview = async (req, res) => {
 
 /**
  * @route   POST /api/infrastructure/import/:sessionId/save
- * @desc    Save selected imported items to main table
- * @access  Private (Admin/Manager)
+ * @desc    Save selected imported items to main table (makes data permanent & visible to all)
+ * @access  Private (ALL USERS)
+ *
+ * When user clicks "Save":
+ * - Data moves from temporary import table to permanent infrastructure_items table
+ * - Data becomes visible to all users in the same region
+ * - Temporary import session is cleared
  */
 const saveImportedItems = async (req, res) => {
   try {
@@ -1019,10 +1020,6 @@ const saveImportedItems = async (req, res) => {
     const userId = req.user.id;
     const userRole = req.user.role;
     const { selectedIds } = req.body; // Array of IDs to save
-
-    if (userRole !== "admin" && userRole !== "manager") {
-      return res.status(403).json({ success: false, error: "Access denied" });
-    }
 
     // Get selected items from import table
     let query = `
@@ -1147,19 +1144,151 @@ const saveImportedItems = async (req, res) => {
 };
 
 /**
+ * @route   POST /api/infrastructure/import/:sessionId/save-item/:itemId
+ * @desc    Save a single imported item to permanent storage
+ * @access  Private (ALL USERS)
+ *
+ * NEW FEATURE: Individual Save
+ * - Allows user to save one item at a time
+ * - Useful for gradual verification
+ * - Item moves from infrastructure_imports to infrastructure_items
+ */
+const saveSingleImportedItem = async (req, res) => {
+  try {
+    const { sessionId, itemId } = req.params;
+    const userId = req.user.id;
+
+    console.log(`💾 Saving single item: ${itemId} from session: ${sessionId}`);
+
+    // Get the specific item from imports table
+    const [items] = await pool.query(
+      `SELECT * FROM infrastructure_imports
+       WHERE import_session_id = ?
+       AND id = ?
+       AND imported_by = ?`,
+      [sessionId, itemId, userId]
+    );
+
+    if (items.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "Item not found or access denied"
+      });
+    }
+
+    const item = items[0];
+
+    // Insert to permanent infrastructure_items table
+    const [result] = await pool.query(
+      `INSERT INTO infrastructure_items
+       (user_id, region_id, created_by, item_type, item_name, unique_id, network_id, ref_code,
+        latitude, longitude, height,
+        address_street, address_city, address_state, address_pincode,
+        contact_name, contact_phone, contact_email,
+        is_rented, rent_amount, agreement_start_date, agreement_end_date,
+        landlord_name, landlord_contact, nature_of_business, owner,
+        structure_type, ups_availability, ups_capacity, backup_capacity, power_source,
+        equipment_list, connected_to, bandwidth,
+        status, installation_date, maintenance_due_date,
+        source, notes, properties)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        userId,
+        item.detected_region_id,
+        userId,
+        item.item_type,
+        item.item_name,
+        item.unique_id,
+        item.network_id,
+        item.ref_code,
+        item.latitude,
+        item.longitude,
+        item.height,
+        item.address_street,
+        item.address_city,
+        item.address_state,
+        item.address_pincode,
+        item.contact_name,
+        item.contact_phone,
+        item.contact_email,
+        item.is_rented,
+        item.rent_amount,
+        item.agreement_start_date,
+        item.agreement_end_date,
+        item.landlord_name,
+        item.landlord_contact,
+        item.nature_of_business,
+        item.owner,
+        item.structure_type,
+        item.ups_availability,
+        item.ups_capacity,
+        item.backup_capacity,
+        item.power_source,
+        item.equipment_list,
+        item.connected_to,
+        item.bandwidth,
+        item.status || "Active",
+        item.installation_date,
+        item.maintenance_due_date,
+        item.source,
+        item.notes,
+        item.properties ? JSON.stringify(item.properties) : null
+      ]
+    );
+
+    // Delete from temporary import table
+    await pool.query(
+      `DELETE FROM infrastructure_imports WHERE id = ?`,
+      [itemId]
+    );
+
+    // Log audit
+    await logAudit(
+      result.insertId,
+      userId,
+      "IMPORT_SINGLE",
+      null,
+      {
+        item_type: item.item_type,
+        item_name: item.item_name,
+        unique_id: item.unique_id,
+        source: "KML",
+        kml_filename: item.kml_filename
+      },
+      req
+    );
+
+    console.log(`✅ Successfully saved item: ${item.item_name} (ID: ${result.insertId})`);
+
+    res.json({
+      success: true,
+      message: `Saved: ${item.item_name}`,
+      data: {
+        id: result.insertId,
+        item_name: item.item_name,
+        item_type: item.item_type
+      }
+    });
+
+  } catch (error) {
+    console.error("Save single item error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to save item"
+    });
+  }
+};
+
+/**
  * @route   DELETE /api/infrastructure/import/:sessionId
- * @desc    Delete all imported items from session
- * @access  Private (Admin/Manager)
+ * @desc    Delete all imported items from session (cancel/discard import)
+ * @access  Private (ALL USERS)
  */
 const deleteImportSession = async (req, res) => {
   try {
     const { sessionId } = req.params;
     const userId = req.user.id;
     const userRole = req.user.role;
-
-    if (userRole !== "admin" && userRole !== "manager") {
-      return res.status(403).json({ success: false, error: "Access denied" });
-    }
 
     await pool.query(
       "DELETE FROM infrastructure_imports WHERE import_session_id = ? AND imported_by = ?",
@@ -1554,6 +1683,7 @@ module.exports = {
   importKML,
   getImportPreview,
   saveImportedItems,
+  saveSingleImportedItem, // 🆕 NEW: Individual save
   deleteImportSession,
   getInfrastructureStats,
   getCategories,
