@@ -4,8 +4,8 @@
   "description": "Backend API server for PersonalGIS Platform with MySQL database",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js",
+    "start": "set NODE_ENV=production && node server.js",
+    "dev": "set NODE_ENV=development && nodemon server.js",
     "test": "node test-apis.js",
     "test-apis": "node test-apis.js",
     "verify-schema": "node verify-schema.js",

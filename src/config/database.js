@@ -1,7 +1,7 @@
 const mysql = require('mysql2/promise');
 require('dotenv').config();
 
-// Create MySQL connection pool
+// Create MySQL connection pool - OPTIMIZED for 100K+ markers and high concurrency
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
@@ -9,11 +9,24 @@ const pool = mysql.createPool({
   database: process.env.DB_NAME,
   port: process.env.DB_PORT,
   waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
+  connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT) || 50, // Increased from 10 to 50 for high concurrency
+  queueLimit: 0, // Unlimited queue
+  maxIdle: parseInt(process.env.DB_MAX_IDLE) || 20, // Maximum idle connections to keep
+  idleTimeout: 60000, // Close idle connections after 60 seconds
   enableKeepAlive: true,
-  keepAliveInitialDelay: 0,
-  timezone: '+00:00' // Force UTC timezone to prevent time mismatch
+  keepAliveInitialDelay: 10000, // Send keep-alive packet every 10 seconds
+  acquireTimeout: 10000, // Wait up to 10 seconds to acquire connection
+  timeout: 60000, // Query timeout 60 seconds
+  connectTimeout: 10000, // Connection timeout 10 seconds
+  timezone: '+00:00', // Force UTC timezone to prevent time mismatch
+  dateStrings: false, // Parse dates as Date objects
+  supportBigNumbers: true,
+  bigNumberStrings: false,
+  multipleStatements: false, // Security: prevent SQL injection via multiple statements
+  namedPlaceholders: false,
+  typeCast: true, // Auto-convert MySQL types to JavaScript types
+  rowsAsArray: false,
+  compress: true // Enable MySQL protocol compression for large result sets (100K+ markers)
 });
 
 // Test database connection

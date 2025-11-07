@@ -5,6 +5,7 @@ const { cacheMiddleware, clearCacheOnMutation } = require("../middleware/cache")
 const {
   getAllInfrastructure,
   getInfrastructureById,
+  getInfrastructureByViewport,
   createInfrastructure,
   updateInfrastructure,
   deleteInfrastructure,
@@ -39,6 +40,7 @@ router.get("/stats", cacheMiddleware(300), getInfrastructureStats);
 router.get("/categories", cacheMiddleware(600), getCategories);
 
 // Map view endpoints (before :id route to avoid conflicts) - with caching
+router.get("/viewport", cacheMiddleware(60), getInfrastructureByViewport); // 1 min cache for viewport queries (100K+ markers)
 router.get("/map-view", cacheMiddleware(120), getMapViewInfrastructure); // 2 min cache for map
 router.get("/clusters", cacheMiddleware(120), getClusters); // 2 min cache for clusters
 
@@ -71,16 +73,16 @@ router.delete(
 // Users can import KML temporarily, then choose to "Save" it permanently
 router.post("/import/kml", importKML); // ✅ All authenticated users can import
 router.get("/import/:sessionId/preview", getImportPreview); // ✅ View preview
-router.post("/import/:sessionId/save-item/:itemId", clearCacheOnMutation(["/api/infrastructure"]), saveSingleImportedItem); // ✅ Save individual item
-router.post("/import/:sessionId/save", clearCacheOnMutation(["/api/infrastructure"]), saveImportedItems); // ✅ Save all selected items (bulk)
+router.post("/import/:sessionId/save-item/:itemId", clearCacheOnMutation(["/api/infrastructure", "/api/infrastructure/viewport", "/api/infrastructure/map-view", "/api/infrastructure/clusters"]), saveSingleImportedItem); // ✅ Save individual item
+router.post("/import/:sessionId/save", clearCacheOnMutation(["/api/infrastructure", "/api/infrastructure/viewport", "/api/infrastructure/map-view", "/api/infrastructure/clusters"]), saveImportedItems); // ✅ Save all selected items (bulk)
 router.delete("/import/:sessionId", deleteImportSession); // ✅ Delete temporary import
 
 // CRUD operations - with caching and cache invalidation
 router.get("/", cacheMiddleware(60), getAllInfrastructure); // 1 min cache
 router.get("/:id", cacheMiddleware(300), getInfrastructureById); // 5 min cache
 router.get("/:id/audit", getInfrastructureItemAuditHistory); // Get audit history for specific item
-router.post("/", clearCacheOnMutation(["/api/infrastructure"]), createInfrastructure);
-router.put("/:id", clearCacheOnMutation(["/api/infrastructure"]), updateInfrastructure);
-router.delete("/:id", clearCacheOnMutation(["/api/infrastructure"]), deleteInfrastructure);
+router.post("/", clearCacheOnMutation(["/api/infrastructure", "/api/infrastructure/viewport", "/api/infrastructure/map-view", "/api/infrastructure/clusters", "/api/infrastructure/stats"]), createInfrastructure);
+router.put("/:id", clearCacheOnMutation(["/api/infrastructure", "/api/infrastructure/viewport", "/api/infrastructure/map-view", "/api/infrastructure/clusters", "/api/infrastructure/stats"]), updateInfrastructure);
+router.delete("/:id", clearCacheOnMutation(["/api/infrastructure", "/api/infrastructure/viewport", "/api/infrastructure/map-view", "/api/infrastructure/clusters", "/api/infrastructure/stats"]), deleteInfrastructure);
 
 module.exports = router;
