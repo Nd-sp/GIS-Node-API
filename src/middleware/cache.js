@@ -49,6 +49,7 @@ const cacheMiddleware = (duration = 300) => {
         // Cache HIT
         cacheStats.hits++;
         console.log(`✅ Cache HIT: ${key} (Hits: ${cacheStats.hits})`);
+        res.setHeader('X-Cache', 'HIT');
         return res.json(cachedData);
       }
 
@@ -65,6 +66,7 @@ const cacheMiddleware = (duration = 300) => {
         cache.set(key, data, duration);
         cacheStats.sets++;
         console.log(`💾 Cached: ${key} for ${duration}s`);
+        res.setHeader('X-Cache', 'MISS');
         return originalJson(data);
       };
 

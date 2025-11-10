@@ -1,4 +1,5 @@
 const express = require("express");
+const http = require("http");
 const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
@@ -9,9 +10,13 @@ const { testConnection } = require("./src/config/database");
 const { errorHandler, notFound } = require("./src/middleware/errorHandler");
 const { startCleanupScheduler } = require("./src/utils/temporaryAccessCleanup");
 const { ensureTables } = require("./src/config/initTables");
+const websocketServer = require("./src/services/websocketServer");
 
 // Initialize Express app
 const app = express();
+
+// Create HTTP server
+const server = http.createServer(app);
 
 // Security middleware
 app.use(helmet());
@@ -302,12 +307,16 @@ const startServer = async () => {
     // Start temporary access cleanup scheduler
     startCleanupScheduler();
 
-    // Start Express server
-    app.listen(PORT, () => {
+    // Initialize WebSocket server
+    websocketServer.initialize(server);
+
+    // Start HTTP server (Express + WebSocket)
+    server.listen(PORT, () => {
       console.log("\n" + "=".repeat(60));
       console.log("🚀 PersonalGIS Backend Server Started Successfully!");
       console.log("=".repeat(60));
-      console.log(`📡 Server: http://localhost:${PORT}`);
+      console.log(`📡 HTTP Server: http://localhost:${PORT}`);
+      console.log(`🔌 WebSocket Server: ws://localhost:${PORT}/ws`);
       console.log(`🌍 Environment: ${process.env.NODE_ENV}`);
       console.log(`📊 Database: ${process.env.DB_NAME}`);
       console.log(`🔒 CORS Enabled: ${process.env.FRONTEND_URL}`);
@@ -337,4 +346,4 @@ process.on("unhandledRejection", (error) => {
 // Start the server
 startServer();
 
-module.exports = app;
+module.exports = { app, server, websocketServer };

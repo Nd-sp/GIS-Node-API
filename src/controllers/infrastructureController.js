@@ -1,6 +1,11 @@
 const { pool } = require("../config/database");
 const { parseStringPromise } = require("xml2js");
 const { v4: uuidv4 } = require("uuid");
+const {
+  isValidIndiaCoordinate,
+  detectState,
+  getNearestState
+} = require("../utils/coordinateValidator");
 
 /**
  * Helper: Log audit trail
@@ -43,57 +48,39 @@ const logAudit = async (
 
 /**
  * Helper: Auto-detect region from coordinates
- * Uses reverse geocoding or region boundary check
+ * Uses coordinate validator with comprehensive state boundaries
  */
 const detectRegionFromCoordinates = async (lat, lng) => {
   try {
-    // For now, simple logic: find region by state/district boundaries
-    // In production, use proper spatial queries or reverse geocoding API
-
-    // Example: Gujarat boundaries (simplified)
-    const regionMappings = [
-      {
-        name: "Gujarat",
-        latMin: 20.0,
-        latMax: 24.7,
-        lngMin: 68.0,
-        lngMax: 74.5
-      },
-      {
-        name: "Maharashtra",
-        latMin: 15.6,
-        latMax: 22.0,
-        lngMin: 72.6,
-        lngMax: 80.9
-      },
-      {
-        name: "Rajasthan",
-        latMin: 23.0,
-        latMax: 30.2,
-        lngMin: 69.5,
-        lngMax: 78.3
-      }
-      // Add more regions as needed
-    ];
-
-    for (const region of regionMappings) {
-      if (
-        lat >= region.latMin &&
-        lat <= region.latMax &&
-        lng >= region.lngMin &&
-        lng <= region.lngMax
-      ) {
-        const [regions] = await pool.query(
-          "SELECT id FROM regions WHERE name = ? AND is_active = TRUE LIMIT 1",
-          [region.name]
-        );
-        if (regions.length > 0) {
-          return regions[0].id;
-        }
-      }
+    // Validate coordinates are within India
+    const validation = isValidIndiaCoordinate(lat, lng);
+    if (!validation.valid) {
+      console.warn(`⚠️ Invalid coordinates (${lat}, ${lng}): ${validation.error}`);
+      const nearest = getNearestState(lat, lng);
+      console.warn(`   Nearest state: ${nearest.state} (${nearest.distance}km away)`);
+      return null;
     }
 
-    return null;
+    // Detect state using coordinate validator
+    const stateDetection = detectState(lat, lng);
+    if (!stateDetection.found) {
+      console.warn(`⚠️ State not detected for (${lat}, ${lng}): ${stateDetection.message}`);
+      return null;
+    }
+
+    // Find region ID from database
+    const [regions] = await pool.query(
+      "SELECT id FROM regions WHERE name = ? AND is_active = TRUE LIMIT 1",
+      [stateDetection.state]
+    );
+
+    if (regions.length > 0) {
+      console.log(`✅ Detected region: ${stateDetection.state} (ID: ${regions[0].id})`);
+      return regions[0].id;
+    } else {
+      console.warn(`⚠️ Region "${stateDetection.state}" not found in database`);
+      return null;
+    }
   } catch (error) {
     console.error("Error detecting region:", error);
     return null;
@@ -209,31 +196,20 @@ const getAllInfrastructure = async (req, res) => {
         // Admin/Manager without filter sees all data
         console.log("🏗️ Admin/Manager viewing all data (no filter specified)");
       } else {
-        // Regular users see only their data or data from assigned regions
-        // Also include infrastructure with NULL region_id if user has ANY region access
+        // Regular users see ONLY data from their assigned regions
+        // This includes both their own data AND others' data from the same regions
         const userFilterClause = ` AND (
-          i.user_id = ?
-          OR i.region_id IN (
+          i.region_id IN (
             SELECT region_id FROM user_regions WHERE user_id = ?
             UNION
             SELECT resource_id FROM temporary_access
             WHERE user_id = ? AND resource_type = 'region'
             AND expires_at > NOW() AND revoked_at IS NULL
           )
-          OR (
-            i.region_id IS NULL
-            AND EXISTS (
-              SELECT 1 FROM user_regions WHERE user_id = ?
-              UNION
-              SELECT 1 FROM temporary_access
-              WHERE user_id = ? AND resource_type = 'region'
-              AND expires_at > NOW() AND revoked_at IS NULL
-            )
-          )
         )`;
         roleFilterClause.push(userFilterClause);
-        params.push(userId, userId, userId, userId, userId);
-        console.log("🏗️ Regular user viewing own data + region data + unassigned infrastructure");
+        params.push(userId, userId);
+        console.log("🏗️ Regular user viewing data from assigned regions (including others' data)");
       }
     }
 
@@ -417,28 +393,23 @@ const getInfrastructureByViewport = async (req, res) => {
     } else {
       // Regular users or admin without filter
       if (userRole !== "admin" && userRole !== "manager") {
+        // Regular users see ONLY data from their assigned regions
+        // This includes both their own data AND others' data from the same regions
         const userFilterClause = ` AND (
-          i.user_id = ?
-          OR i.region_id IN (
+          i.region_id IN (
             SELECT region_id FROM user_regions WHERE user_id = ?
             UNION
             SELECT resource_id FROM temporary_access
             WHERE user_id = ? AND resource_type = 'region'
             AND expires_at > NOW() AND revoked_at IS NULL
           )
-          OR (
-            i.region_id IS NULL
-            AND EXISTS (
-              SELECT 1 FROM user_regions WHERE user_id = ?
-              UNION
-              SELECT 1 FROM temporary_access
-              WHERE user_id = ? AND resource_type = 'region'
-              AND expires_at > NOW() AND revoked_at IS NULL
-            )
-          )
         )`;
         query += userFilterClause;
-        params.push(userId, userId, userId, userId, userId);
+        params.push(userId, userId);
+        console.log("🗺️ Viewport query: Filtering by assigned regions for user", userId, "role:", userRole);
+        console.log("🔍 Query includes region filter:", userFilterClause);
+      } else {
+        console.log("🗺️ Viewport query: Admin/Manager - NO region filtering for user", userId, "role:", userRole);
       }
     }
 
@@ -594,6 +565,19 @@ const createInfrastructure = async (req, res) => {
         success: false,
         error:
           "Required fields: item_type, item_name, unique_id, latitude, longitude"
+      });
+    }
+
+    // Validate coordinates are within India
+    const validation = isValidIndiaCoordinate(latitude, longitude);
+    if (!validation.valid) {
+      const nearest = getNearestState(latitude, longitude);
+      return res.status(400).json({
+        success: false,
+        error: `Invalid coordinates: ${validation.error}`,
+        suggestion: nearest.suggestion,
+        nearestState: nearest.state,
+        distanceKm: nearest.distance
       });
     }
 
@@ -1002,7 +986,20 @@ const importKML = async (req, res) => {
         .split(",")
         .map((v) => parseFloat(v.trim()));
 
-      if (isNaN(lat) || isNaN(lng)) continue;
+      if (isNaN(lat) || isNaN(lng)) {
+        console.warn(`⚠️ Skipping "${name}": Invalid coordinates (NaN)`);
+        continue;
+      }
+
+      // Validate coordinates are within India
+      const validation = isValidIndiaCoordinate(lat, lng);
+      if (!validation.valid) {
+        const nearest = getNearestState(lat, lng);
+        console.warn(`⚠️ Skipping "${name}": ${validation.error}`);
+        console.warn(`   Coordinates: (${lat}, ${lng})`);
+        console.warn(`   ${nearest.suggestion}`);
+        continue; // Skip items with invalid coordinates
+      }
 
       // ✅ IMPROVED TYPE DETECTION - Multi-level approach
       let type = placemark._folderType || "POP"; // Use folder type if available
@@ -1857,6 +1854,73 @@ const getClusters = async (req, res) => {
   }
 };
 
+/**
+ * @route   GET /api/infrastructure/validate/coordinates
+ * @desc    Scan and report invalid coordinates (Admin only)
+ * @access  Private (Admin)
+ */
+const validateCoordinates = async (req, res) => {
+  try {
+    const userRole = (req.user.role || "").toLowerCase();
+
+    // Only admin can run this scan
+    if (userRole !== "admin") {
+      return res.status(403).json({
+        success: false,
+        error: "Access denied. Admin only."
+      });
+    }
+
+    const {
+      scanInvalidCoordinates,
+      generateDeleteScript,
+      generateCSVReport,
+      analyzeBySource,
+      generateFixReport
+    } = require("../utils/coordinateFixUtility");
+
+    const format = req.query.format || "json"; // json, csv, sql
+
+    if (format === "full") {
+      // Generate comprehensive report
+      const report = await generateFixReport();
+      return res.json({
+        success: true,
+        report
+      });
+    }
+
+    // Basic scan
+    const scanResult = await scanInvalidCoordinates();
+
+    if (format === "csv") {
+      const csv = generateCSVReport(scanResult.details.invalidCoordinates);
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", "attachment; filename=invalid_coordinates.csv");
+      return res.send(csv);
+    }
+
+    if (format === "sql") {
+      const sql = generateDeleteScript(scanResult.details.invalidCoordinates);
+      res.setHeader("Content-Type", "text/plain");
+      res.setHeader("Content-Disposition", "attachment; filename=delete_invalid_coordinates.sql");
+      return res.send(sql);
+    }
+
+    // Default JSON response
+    res.json({
+      success: true,
+      ...scanResult
+    });
+  } catch (error) {
+    console.error("Coordinate validation error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to validate coordinates"
+    });
+  }
+};
+
 module.exports = {
   getAllInfrastructure,
   getInfrastructureById,
@@ -1872,5 +1936,6 @@ module.exports = {
   getInfrastructureStats,
   getCategories,
   getMapViewInfrastructure,
-  getClusters
+  getClusters,
+  validateCoordinates // 🆕 NEW: Coordinate validation utility
 };

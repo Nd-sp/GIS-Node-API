@@ -1590,12 +1590,18 @@ const forceLogoutUser = async (req, res) => {
       admin: req.user.username
     }, req);
 
+    // Send WebSocket notification to user for immediate logout
+    const websocketServer = require('../services/websocketServer');
+    const wsSent = websocketServer.forceLogoutUser(id, `Your session was terminated by admin: ${req.user.username}`);
+
     console.log(`✅ Admin ${req.user.username} forced logout ${result.affectedRows} session(s) for user ${user.username}`);
+    console.log(`📡 WebSocket notification ${wsSent ? 'sent' : 'not sent'} (user ${wsSent ? 'online' : 'offline'})`);
 
     res.json({
       success: true,
       message: `Successfully logged out ${result.affectedRows} active session(s) for ${user.username}`,
-      sessionsTerminated: result.affectedRows
+      sessionsTerminated: result.affectedRows,
+      websocketNotificationSent: wsSent
     });
 
   } catch (error) {

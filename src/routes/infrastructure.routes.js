@@ -17,7 +17,8 @@ const {
   getInfrastructureStats,
   getCategories,
   getMapViewInfrastructure,
-  getClusters
+  getClusters,
+  validateCoordinates
 } = require("../controllers/infrastructureController");
 const {
   getInfrastructureAuditLogs,
@@ -38,6 +39,9 @@ router.get("/stats", cacheMiddleware(300), getInfrastructureStats);
 
 // Categories endpoint (before :id route to avoid conflicts) - with caching
 router.get("/categories", cacheMiddleware(600), getCategories);
+
+// Coordinate validation utility (Admin only)
+router.get("/validate/coordinates", authorize("admin", "Admin"), validateCoordinates);
 
 // Map view endpoints (before :id route to avoid conflicts) - with caching
 router.get("/viewport", cacheMiddleware(60), getInfrastructureByViewport); // 1 min cache for viewport queries (100K+ markers)

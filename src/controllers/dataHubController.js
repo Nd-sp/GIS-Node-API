@@ -41,63 +41,99 @@ const getAllData = async (req, res) => {
       }
     }
 
-    // Fetch all measurement types with username
-    const [distances] = await pool.query(
-      `SELECT d.*, u.username as username FROM distance_measurements d
-       LEFT JOIN users u ON d.user_id = u.id
-       ${whereCondition} ORDER BY d.created_at DESC`,
-      whereParams
-    );
-    distances.forEach(d => allData.push({ ...d, type: 'Distance' }));
+    // Fetch all measurement types with username (with error handling for each query)
+    try {
+      const [distances] = await pool.query(
+        `SELECT d.*, u.username as username FROM distance_measurements d
+         LEFT JOIN users u ON d.user_id = u.id
+         ${whereCondition} ORDER BY d.created_at DESC`,
+        whereParams
+      );
+      distances.forEach(d => allData.push({ ...d, type: 'Distance' }));
+    } catch (error) {
+      console.error('Error fetching distance measurements:', error);
+    }
 
-    const [polygons] = await pool.query(
-      `SELECT p.*, u.username as username FROM polygon_drawings p
-       LEFT JOIN users u ON p.user_id = u.id
-       ${whereCondition} ORDER BY p.created_at DESC`,
-      whereParams
-    );
-    polygons.forEach(p => allData.push({ ...p, type: 'Polygon' }));
+    try {
+      const [polygons] = await pool.query(
+        `SELECT p.*, u.username as username FROM polygon_drawings p
+         LEFT JOIN users u ON p.user_id = u.id
+         ${whereCondition} ORDER BY p.created_at DESC`,
+        whereParams
+      );
+      polygons.forEach(p => allData.push({ ...p, type: 'Polygon' }));
+    } catch (error) {
+      console.error('Error fetching polygons:', error);
+    }
 
-    const [circles] = await pool.query(
-      `SELECT c.*, u.username as username FROM circle_drawings c
-       LEFT JOIN users u ON c.user_id = u.id
-       ${whereCondition} ORDER BY c.created_at DESC`,
-      whereParams
-    );
-    circles.forEach(c => allData.push({ ...c, type: 'Circle' }));
+    try {
+      const [circles] = await pool.query(
+        `SELECT c.*, u.username as username FROM circle_drawings c
+         LEFT JOIN users u ON c.user_id = u.id
+         ${whereCondition} ORDER BY c.created_at DESC`,
+        whereParams
+      );
+      circles.forEach(c => allData.push({ ...c, type: 'Circle' }));
+    } catch (error) {
+      console.error('Error fetching circles:', error);
+    }
 
-    const [elevations] = await pool.query(
-      `SELECT e.*, u.username as username FROM elevation_profiles e
-       LEFT JOIN users u ON e.user_id = u.id
-       ${whereCondition} ORDER BY e.created_at DESC`,
-      whereParams
-    );
-    elevations.forEach(e => allData.push({ ...e, type: 'Elevation' }));
+    try {
+      // 🚀 Exclude large JSON fields to prevent "Out of sort memory" error
+      const [elevations] = await pool.query(
+        `SELECT e.id, e.user_id, e.profile_name, e.start_point, e.end_point,
+                e.total_distance, e.min_elevation, e.max_elevation,
+                e.elevation_gain, e.elevation_loss, e.bearing, e.reverse_bearing, e.notes,
+                e.antenna_height_1, e.antenna_height_2, e.rf_frequency,
+                e.created_at, e.updated_at, e.is_saved, e.region_id,
+                u.username as username
+         FROM elevation_profiles e
+         LEFT JOIN users u ON e.user_id = u.id
+         ${whereCondition} ORDER BY e.created_at DESC`,
+        whereParams
+      );
+      elevations.forEach(e => allData.push({ ...e, type: 'Elevation' }));
+    } catch (error) {
+      console.error('Error fetching elevation profiles:', error);
+    }
 
-    const [infrastructures] = await pool.query(
-      `SELECT i.*, u.username as username FROM infrastructure_items i
-       LEFT JOIN users u ON i.user_id = u.id
-       ${whereCondition} ORDER BY i.created_at DESC`,
-      whereParams
-    );
-    infrastructures.forEach(i => allData.push({ ...i, type: 'Infrastructure' }));
+    try {
+      const [infrastructures] = await pool.query(
+        `SELECT i.*, u.username as username FROM infrastructure_items i
+         LEFT JOIN users u ON i.user_id = u.id
+         ${whereCondition} ORDER BY i.created_at DESC`,
+        whereParams
+      );
+      infrastructures.forEach(i => allData.push({ ...i, type: 'Infrastructure' }));
+    } catch (error) {
+      console.error('Error fetching infrastructure:', error);
+    }
 
-    const [sectors] = await pool.query(
-      `SELECT s.*, u.username as username FROM sector_rf_data s
-       LEFT JOIN users u ON s.user_id = u.id
-       ${whereCondition} ORDER BY s.created_at DESC`,
-      whereParams
-    );
-    sectors.forEach(s => allData.push({ ...s, type: 'SectorRF' }));
+    try {
+      const [sectors] = await pool.query(
+        `SELECT s.*, u.username as username FROM sector_rf_data s
+         LEFT JOIN users u ON s.user_id = u.id
+         ${whereCondition} ORDER BY s.created_at DESC`,
+        whereParams
+      );
+      sectors.forEach(s => allData.push({ ...s, type: 'SectorRF' }));
+    } catch (error) {
+      console.error('Error fetching sectors:', error);
+    }
+
+    // Count items by type for logging
+    const counts = {
+      distances: allData.filter(item => item.type === 'Distance').length,
+      polygons: allData.filter(item => item.type === 'Polygon').length,
+      circles: allData.filter(item => item.type === 'Circle').length,
+      elevations: allData.filter(item => item.type === 'Elevation').length,
+      infrastructures: allData.filter(item => item.type === 'Infrastructure').length,
+      sectors: allData.filter(item => item.type === 'SectorRF').length
+    };
 
     console.log('📊 DataHub response:', {
       totalItems: allData.length,
-      distances: distances.length,
-      polygons: polygons.length,
-      circles: circles.length,
-      elevations: elevations.length,
-      infrastructures: infrastructures.length,
-      sectors: sectors.length
+      ...counts
     });
 
     res.json({ success: true, data: allData, count: allData.length });

@@ -18,7 +18,7 @@ exports.getUserPreferences = async (req, res) => {
       return res.json({
         success: true,
         preferences: {
-          default_map_type: 'roadmap',
+          default_map_type: 'satellite',
           default_zoom: 10,
           default_center: null,
           default_region_id: null,
@@ -116,7 +116,7 @@ exports.saveUserPreferences = async (req, res) => {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           userId,
-          default_map_type || 'roadmap',
+          default_map_type || 'satellite',
           default_zoom || 10,
           default_center ? JSON.stringify(default_center) : null,
           default_region_id || null,

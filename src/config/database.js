@@ -15,8 +15,6 @@ const pool = mysql.createPool({
   idleTimeout: 60000, // Close idle connections after 60 seconds
   enableKeepAlive: true,
   keepAliveInitialDelay: 10000, // Send keep-alive packet every 10 seconds
-  acquireTimeout: 10000, // Wait up to 10 seconds to acquire connection
-  timeout: 60000, // Query timeout 60 seconds
   connectTimeout: 10000, // Connection timeout 10 seconds
   timezone: '+00:00', // Force UTC timezone to prevent time mismatch
   dateStrings: false, // Parse dates as Date objects
