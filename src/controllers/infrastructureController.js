@@ -534,6 +534,8 @@ const createInfrastructure = async (req, res) => {
       contact_name,
       contact_phone,
       contact_email,
+      customer_name, // New field for customer selection
+      icon_type, // New field for icon consistency
       is_rented,
       rent_amount,
       agreement_start_date,
@@ -589,14 +591,14 @@ const createInfrastructure = async (req, res) => {
        (user_id, region_id, created_by, item_type, item_name, unique_id, network_id, ref_code,
         latitude, longitude, height,
         address_street, address_city, address_state, address_pincode,
-        contact_name, contact_phone, contact_email,
+        contact_name, contact_phone, contact_email, customer_name, icon_type,
         is_rented, rent_amount, agreement_start_date, agreement_end_date,
         landlord_name, landlord_contact, nature_of_business, owner,
         structure_type, ups_availability, ups_capacity, backup_capacity, power_source,
         equipment_list, connected_to, bandwidth,
         status, installation_date, maintenance_due_date,
         source, notes, properties, capacity, equipment_details)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         userId,
         region_id,
@@ -616,6 +618,8 @@ const createInfrastructure = async (req, res) => {
         contact_name,
         contact_phone,
         contact_email,
+        customer_name || null, // New field for customer selection
+        icon_type || null, // New field for icon consistency
         is_rented || false,
         rent_amount,
         agreement_start_date,
@@ -1921,6 +1925,66 @@ const validateCoordinates = async (req, res) => {
   }
 };
 
+/**
+ * @route   GET /api/infrastructure/debug/counts
+ * @desc    Debug endpoint to check raw database counts (Admin only)
+ * @access  Private (Admin)
+ */
+const debugGetCounts = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const userRole = (req.user.role || "").toLowerCase();
+
+    // Get total count
+    const [totalResult] = await pool.query(
+      "SELECT COUNT(*) as total FROM infrastructure_items"
+    );
+
+    // Get count by user
+    const [userResult] = await pool.query(
+      "SELECT COUNT(*) as user_total FROM infrastructure_items WHERE user_id = ?",
+      [userId]
+    );
+
+    // Get user's assigned regions
+    const [userRegions] = await pool.query(
+      "SELECT r.id, r.name FROM user_regions ur JOIN regions r ON ur.region_id = r.id WHERE ur.user_id = ?",
+      [userId]
+    );
+
+    // Get count by assigned regions
+    const [regionResult] = await pool.query(
+      `SELECT COUNT(*) as region_total FROM infrastructure_items
+       WHERE region_id IN (SELECT region_id FROM user_regions WHERE user_id = ?)`,
+      [userId]
+    );
+
+    // Get infrastructure by type
+    const [typeResult] = await pool.query(
+      `SELECT item_type, COUNT(*) as count FROM infrastructure_items GROUP BY item_type`
+    );
+
+    res.json({
+      success: true,
+      debug: {
+        userId,
+        userRole,
+        totalInfrastructure: totalResult[0].total,
+        userInfrastructure: userResult[0].user_total,
+        userAssignedRegions: userRegions,
+        infrastructureInAssignedRegions: regionResult[0].region_total,
+        infrastructureByType: typeResult
+      }
+    });
+  } catch (error) {
+    console.error("Debug counts error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get debug counts"
+    });
+  }
+};
+
 module.exports = {
   getAllInfrastructure,
   getInfrastructureById,
@@ -1937,5 +2001,6 @@ module.exports = {
   getCategories,
   getMapViewInfrastructure,
   getClusters,
-  validateCoordinates // 🆕 NEW: Coordinate validation utility
+  validateCoordinates, // 🆕 NEW: Coordinate validation utility
+  debugGetCounts // 🆕 NEW: Debug endpoint
 };

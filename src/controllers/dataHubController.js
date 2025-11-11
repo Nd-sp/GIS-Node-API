@@ -401,7 +401,8 @@ const deleteSingleData = async (req, res) => {
       'circle': 'circle_drawings',
       'sector': 'sector_rf_data',
       'elevation': 'elevation_profiles',
-      'infrastructure': 'infrastructure_items'
+      'infrastructure': 'infrastructure_items',
+      'customer': 'infrastructure_items' // Customers are also stored in infrastructure_items
     };
 
     const tableName = tableMap[type];
@@ -482,7 +483,8 @@ const deleteBulkData = async (req, res) => {
       'circle': 'circle_drawings',
       'sector': 'sector_rf_data',
       'elevation': 'elevation_profiles',
-      'infrastructure': 'infrastructure_items'
+      'infrastructure': 'infrastructure_items',
+      'customer': 'infrastructure_items' // Customers are also stored in infrastructure_items
     };
 
     const tableName = tableMap[type];
