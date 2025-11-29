@@ -23,7 +23,7 @@ const currentUserRole = (req.user.role || '').toLowerCase();
     let query = `
       SELECT dm.*, u.username as username
       FROM distance_measurements dm
-      LEFT JOIN users u ON dm.user_id = u.id
+      LEFT JOIN users u ON dm.created_by = u.id
     `;
     let params = [];
     let whereConditions = [];
@@ -34,12 +34,12 @@ if (filter === 'all' && (currentUserRole === 'admin' || currentUserRole === 'man
       console.log('📏 Admin/Manager viewing ALL users data');
 } else if (filter === 'user' && (currentUserRole === 'admin' || currentUserRole === 'manager') && filterUserId) {
       // Admin/Manager viewing specific user's data
-      whereConditions.push('dm.user_id = ?');
+      whereConditions.push('dm.created_by = ?');
       params.push(parseInt(filterUserId));
       console.log('📏 Admin/Manager viewing user', filterUserId);
     } else {
       // Default: current user's data only
-      whereConditions.push('dm.user_id = ?');
+      whereConditions.push('dm.created_by = ?');
       params.push(currentUserId);
       console.log('📏 User viewing own data only');
     }
@@ -123,35 +123,36 @@ const createMeasurement = async (req, res) => {
       return res.status(400).json({ success: false, error: 'Points and distance required' });
     }
 
+    // Extract start and end points from points array
+    const startPoint = points[0];
+    const endPoint = points[points.length - 1];
+
     const [result] = await pool.query(
       `INSERT INTO distance_measurements
-       (user_id, region_id, measurement_name, points, total_distance, unit, notes, is_saved,
-        elevation_data, min_elevation, max_elevation, elevation_gain, elevation_loss)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (created_by, region_id, measurement_name, start_lat, start_lng, end_lat, end_lng,
+        distance_meters, unit, notes, is_saved, properties)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         userId,
         region_id,
         measurement_name,
-        JSON.stringify(points),
+        startPoint.lat,
+        startPoint.lng,
+        endPoint.lat,
+        endPoint.lng,
         total_distance,
-        unit || 'kilometers',
+        unit || 'meters',
         notes,
         is_saved || false,
-        elevation_data ? JSON.stringify(elevation_data) : null,
-        min_elevation || null,
-        max_elevation || null,
-        elevation_gain || null,
-        elevation_loss || null
+        null // properties
       ]
     );
 
     // Log audit
     await logAudit(userId, 'CREATE', 'distance_measurement', result.insertId, {
-      measurement_name,
-      total_distance,
-      unit: unit || 'kilometers',
-      points_count: points?.length || 0,
-      has_elevation_data: !!elevation_data
+      distance_meters: total_distance,
+      unit: unit || 'meters',
+      points_count: points?.length || 0
     }, req);
 
     res.status(201).json({

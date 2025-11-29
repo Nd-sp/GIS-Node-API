@@ -53,7 +53,7 @@ const getGroupById = async (req, res) => {
               u.username as owner_username,
               u.full_name as owner_name
        FROM \`groups\` g
-       INNER JOIN users u ON g.owner_id = u.id
+       INNER JOIN users u ON g.created_by = u.id
        WHERE g.id = ?`,
       [id]
     );
@@ -80,7 +80,7 @@ const getGroupById = async (req, res) => {
 const createGroup = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { name, description, is_public } = req.body;
+    const { name, description, is_active } = req.body;
 
     if (!name) {
       return res.status(400).json({ success: false, error: 'Group name required' });
@@ -88,9 +88,9 @@ const createGroup = async (req, res) => {
 
     // Create group
     const [result] = await pool.query(
-      `INSERT INTO \`groups\` (name, description, owner_id, is_public)
+      `INSERT INTO \`groups\` (name, description, created_by, is_active)
        VALUES (?, ?, ?, ?)`,
-      [name, description, userId, is_public || false]
+      [name, description, userId, is_active !== undefined ? is_active : true]
     );
 
     const groupId = result.insertId;
@@ -108,7 +108,8 @@ const createGroup = async (req, res) => {
         id: groupId,
         name,
         description,
-        owner_id: userId
+        created_by: userId,
+        is_active: is_active !== undefined ? is_active : true
       }
     });
   } catch (error) {
@@ -126,11 +127,11 @@ const updateGroup = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.id;
-    const { name, description, is_public } = req.body;
+    const { name, description, is_active } = req.body;
 
-    // Check if user is owner
+    // Check if user is creator
     const [groups] = await pool.query(
-      'SELECT owner_id FROM `groups` WHERE id = ?',
+      'SELECT created_by FROM `groups` WHERE id = ?',
       [id]
     );
 
@@ -138,8 +139,8 @@ const updateGroup = async (req, res) => {
       return res.status(404).json({ success: false, error: 'Group not found' });
     }
 
-    if (groups[0].owner_id !== userId) {
-      return res.status(403).json({ success: false, error: 'Only owner can update group' });
+    if (groups[0].created_by !== userId) {
+      return res.status(403).json({ success: false, error: 'Only creator can update group' });
     }
 
     const updates = [];
@@ -153,9 +154,9 @@ const updateGroup = async (req, res) => {
       updates.push('description = ?');
       params.push(description);
     }
-    if (is_public !== undefined) {
-      updates.push('is_public = ?');
-      params.push(is_public);
+    if (is_active !== undefined) {
+      updates.push('is_active = ?');
+      params.push(is_active);
     }
 
     if (updates.length === 0) {
@@ -187,9 +188,9 @@ const deleteGroup = async (req, res) => {
     const { id } = req.params;
     const userId = req.user.id;
 
-    // Check if user is owner
+    // Check if user is creator
     const [groups] = await pool.query(
-      'SELECT owner_id FROM `groups` WHERE id = ?',
+      'SELECT created_by FROM `groups` WHERE id = ?',
       [id]
     );
 
@@ -197,8 +198,8 @@ const deleteGroup = async (req, res) => {
       return res.status(404).json({ success: false, error: 'Group not found' });
     }
 
-    if (groups[0].owner_id !== userId) {
-      return res.status(403).json({ success: false, error: 'Only owner can delete group' });
+    if (groups[0].created_by !== userId) {
+      return res.status(403).json({ success: false, error: 'Only creator can delete group' });
     }
 
     await pool.query('DELETE FROM `groups` WHERE id = ?', [id]);
@@ -247,7 +248,7 @@ const getGroupMembers = async (req, res) => {
            WHEN 'admin' THEN 2
            WHEN 'member' THEN 3
          END,
-         gm.joined_at ASC`,
+         gm.added_at ASC`,
       [id]
     );
 
@@ -374,9 +375,9 @@ const updateMemberRole = async (req, res) => {
       return res.status(400).json({ success: false, error: 'Invalid role. Must be member or admin' });
     }
 
-    // Check if requester is owner
+    // Check if requester is creator
     const [groups] = await pool.query(
-      'SELECT owner_id FROM `groups` WHERE id = ?',
+      'SELECT created_by FROM `groups` WHERE id = ?',
       [id]
     );
 
@@ -384,8 +385,8 @@ const updateMemberRole = async (req, res) => {
       return res.status(404).json({ success: false, error: 'Group not found' });
     }
 
-    if (groups[0].owner_id !== userId) {
-      return res.status(403).json({ success: false, error: 'Only owner can update member roles' });
+    if (groups[0].created_by !== userId) {
+      return res.status(403).json({ success: false, error: 'Only creator can update member roles' });
     }
 
     // Check if member exists

@@ -61,20 +61,13 @@ const getAllRequests = async (req, res) => {
 const createRequest = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { region_id, region_name, request_type, reason } = req.body;
+    const { region_id, region_name, comments } = req.body;
 
     // Accept either region_id or region_name
-    if ((!region_id && !region_name) || !request_type) {
+    if (!region_id && !region_name) {
       return res.status(400).json({
         success: false,
-        error: 'Region (ID or name) and request type are required'
-      });
-    }
-
-    if (!['access', 'modification', 'creation'].includes(request_type)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid request type. Must be: access, modification, or creation'
+        error: 'Region (ID or name) is required'
       });
     }
 
@@ -94,25 +87,23 @@ const createRequest = async (req, res) => {
       regionId = regions[0].id;
     }
 
-    // Check if user already has access (for access requests)
-    if (request_type === 'access') {
-      const [existingAccess] = await pool.query(
-        'SELECT id FROM user_regions WHERE user_id = ? AND region_id = ?',
-        [userId, regionId]
-      );
+    // Check if user already has access
+    const [existingAccess] = await pool.query(
+      'SELECT id FROM user_regions WHERE user_id = ? AND region_id = ?',
+      [userId, regionId]
+    );
 
-      if (existingAccess.length > 0) {
-        return res.status(400).json({
-          success: false,
-          error: 'You already have access to this region'
-        });
-      }
+    if (existingAccess.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'You already have access to this region'
+      });
     }
 
     // Check for pending request
     const [pendingRequests] = await pool.query(
-      'SELECT id FROM region_requests WHERE user_id = ? AND region_id = ? AND request_type = ? AND status = ?',
-      [userId, regionId, request_type, 'pending']
+      'SELECT id FROM region_requests WHERE user_id = ? AND region_id = ? AND status = ?',
+      [userId, regionId, 'pending']
     );
 
     if (pendingRequests.length > 0) {
@@ -124,12 +115,12 @@ const createRequest = async (req, res) => {
 
     const [result] = await pool.query(
       `INSERT INTO region_requests
-       (user_id, region_id, request_type, reason, status)
-       VALUES (?, ?, ?, ?, 'pending')`,
-      [userId, regionId, request_type, reason || '']
+       (user_id, region_id, comments, status)
+       VALUES (?, ?, ?, 'pending')`,
+      [userId, regionId, comments || '']
     );
 
-    console.log(`✅ Created region request ID: ${result.insertId} for user ${userId} - ${request_type} for region ${regionId}`);
+    console.log(`✅ Created region request ID: ${result.insertId} for user ${userId} for region ${regionId}`);
 
     // Get region and user info for notification
     const [regionInfo] = await pool.query('SELECT name, code FROM regions WHERE id = ?', [regionId]);
@@ -143,7 +134,7 @@ const createRequest = async (req, res) => {
       await notifyAllAdmins(
         'region_request',
         '🗺️ New Region Request',
-        `${userName} has requested ${request_type} for ${regionName}`,
+        `${userName} has requested access to ${regionName}`,
         {
           data: {
             requestId: result.insertId,
@@ -151,8 +142,7 @@ const createRequest = async (req, res) => {
             userName,
             regionId,
             regionName,
-            requestType: request_type,
-            reason
+            comments
           },
           priority: 'high',
           action_url: '/admin/region-requests',
@@ -171,8 +161,7 @@ const createRequest = async (req, res) => {
         id: result.insertId,
         user_id: userId,
         region_id: regionId,
-        request_type,
-        reason,
+        comments,
         status: 'pending'
       }
     });
@@ -192,7 +181,7 @@ const approveRequest = async (req, res) => {
     const { id } = req.params;
     const reviewerId = req.user.id;
     const reviewerRole = req.user.role?.toLowerCase(); // Case-insensitive role check
-    const { review_notes } = req.body;
+    const { comments: reviewComments } = req.body;
 
     if (reviewerRole !== 'admin' && reviewerRole !== 'manager') {
       return res.status(403).json({
@@ -228,26 +217,18 @@ const approveRequest = async (req, res) => {
       // Update request status
       await connection.query(
         `UPDATE region_requests
-         SET status = 'approved', reviewed_by = ?, reviewed_at = NOW(), review_notes = ?
+         SET status = 'approved', reviewed_by = ?, reviewed_at = NOW(), comments = ?
          WHERE id = ?`,
-        [reviewerId, review_notes, id]
+        [reviewerId, reviewComments, id]
       );
 
-      // Grant access based on request type
-      if (request.request_type === 'access') {
-        await connection.query(
-          `INSERT INTO user_regions (user_id, region_id, access_level, assigned_by)
-           VALUES (?, ?, 'read', ?)
-           ON DUPLICATE KEY UPDATE access_level = 'read', assigned_by = ?`,
-          [request.user_id, request.region_id, reviewerId, reviewerId]
-        );
-      } else if (request.request_type === 'creation') {
-        // Activate the region if it was created
-        await connection.query(
-          'UPDATE regions SET is_active = true WHERE id = ?',
-          [request.region_id]
-        );
-      }
+      // Grant access to the region
+      await connection.query(
+        `INSERT INTO user_regions (user_id, region_id, assigned_by)
+         VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE assigned_by = ?`,
+        [request.user_id, request.region_id, reviewerId, reviewerId]
+      );
 
       await connection.commit();
 
@@ -264,14 +245,13 @@ const approveRequest = async (req, res) => {
           request.user_id,
           'region_request',
           '✅ Region Request Approved',
-          `Your request for ${request.request_type} to ${regionName} has been approved`,
+          `Your request for access to ${regionName} has been approved`,
           {
             data: {
               requestId: id,
               regionId: request.region_id,
               regionName,
-              requestType: request.request_type,
-              reviewNotes: review_notes
+              reviewNotes: reviewComments
             },
             priority: 'high',
             action_url: '/map',
@@ -307,7 +287,7 @@ const rejectRequest = async (req, res) => {
     const { id } = req.params;
     const reviewerId = req.user.id;
     const reviewerRole = req.user.role?.toLowerCase(); // Case-insensitive role check
-    const { review_notes } = req.body;
+    const { comments: reviewComments } = req.body;
 
     if (reviewerRole !== 'admin' && reviewerRole !== 'manager') {
       return res.status(403).json({
@@ -338,11 +318,11 @@ const rejectRequest = async (req, res) => {
     await pool.query(
       `UPDATE region_requests
        SET status = 'rejected',
-           review_notes = ?,
+           comments = ?,
            reviewed_by = ?,
            reviewed_at = NOW()
        WHERE id = ?`,
-      [review_notes || 'Rejected', reviewerId, id]
+      [reviewComments || 'Rejected', reviewerId, id]
     );
 
     // Get region and user info for notification
@@ -358,13 +338,12 @@ const rejectRequest = async (req, res) => {
         request.user_id,
         'region_request',
         '❌ Region Request Rejected',
-        `Your request for ${request.request_type} to ${regionName} has been rejected`,
+        `Your request for access to ${regionName} has been rejected`,
         {
           data: {
             requestId: id,
             regionId: request.region_id,
             regionName,
-            requestType: request.request_type,
             reviewNotes: review_notes
           },
           priority: 'high',

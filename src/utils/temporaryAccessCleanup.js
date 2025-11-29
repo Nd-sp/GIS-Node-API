@@ -14,14 +14,13 @@ const cleanupExpiredTemporaryAccess = async () => {
 
     // Find all expired temporary access records
     const [expiredAccess] = await pool.query(
-      `SELECT ta.id, ta.user_id, ta.resource_id, r.name as region_name,
+      `SELECT ta.id, ta.user_id, ta.region_id, r.name as region_name,
               u.username, u.full_name
-       FROM temporary_access ta
-       INNER JOIN regions r ON ta.resource_id = r.id
+       FROM temporary_access_log ta
+       INNER JOIN regions r ON ta.region_id = r.id
        INNER JOIN users u ON ta.user_id = u.id
-       WHERE ta.resource_type = 'region'
-         AND ta.revoked_at IS NULL
-         AND ta.expires_at <= UTC_TIMESTAMP()`
+       WHERE ta.status != 'revoked'
+         AND ta.end_time <= UTC_TIMESTAMP()`
     );
 
     if (expiredAccess.length === 0) {
@@ -35,14 +34,14 @@ const cleanupExpiredTemporaryAccess = async () => {
     const expiredGrants = [];
 
     for (const access of expiredAccess) {
-      const { user_id, resource_id, region_name, username, full_name } = access;
+      const { user_id, region_id, region_name, username, full_name } = access;
 
       // Check if there are any OTHER active temporary access grants for this user-region combo
       const [otherActiveGrants] = await pool.query(
-        `SELECT id FROM temporary_access
-         WHERE user_id = ? AND resource_id = ? AND resource_type = 'region'
-         AND revoked_at IS NULL AND expires_at > UTC_TIMESTAMP()`,
-        [user_id, resource_id]
+        `SELECT id FROM temporary_access_log
+         WHERE user_id = ? AND region_id = ?
+         AND status != 'revoked' AND end_time > UTC_TIMESTAMP()`,
+        [user_id, region_id]
       );
 
       // Only remove from user_regions if no other active temporary access exists
@@ -51,21 +50,21 @@ const cleanupExpiredTemporaryAccess = async () => {
         // We identify temporary entries by checking if they exist in temporary_access table
         const [permanentAccess] = await pool.query(
           `SELECT ur.id FROM user_regions ur
-           LEFT JOIN temporary_access ta ON ur.user_id = ta.user_id 
-             AND ur.region_id = ta.resource_id 
-             AND ta.resource_type = 'region'
-             AND ta.revoked_at IS NULL
-             AND ta.expires_at > UTC_TIMESTAMP()
+           LEFT JOIN temporary_access_log ta ON ur.user_id = ta.user_id
+             AND ur.region_id = ta.region_id
+
+             AND ta.status != 'revoked'
+             AND ta.end_time > UTC_TIMESTAMP()
            WHERE ur.user_id = ? AND ur.region_id = ?
              AND ta.id IS NULL`,
-          [user_id, resource_id]
+          [user_id, region_id]
         );
 
         // Only delete if it's NOT a permanent access
         if (permanentAccess.length === 0) {
           await pool.query(
             'DELETE FROM user_regions WHERE user_id = ? AND region_id = ?',
-            [user_id, resource_id]
+            [user_id, region_id]
           );
 
           console.log(`  ✅ Removed expired temporary access: ${full_name} (${username}) -> ${region_name}`);
@@ -104,15 +103,15 @@ const notifyExpiringTemporaryAccess = async () => {
     // Find temporary access that expires in the next 24-25 hours
     // We use a 1-hour window to avoid sending duplicate notifications
     const [expiringAccess] = await pool.query(
-      `SELECT ta.id, ta.user_id, ta.resource_id, ta.expires_at,
+      `SELECT ta.id, ta.user_id, ta.region_id, ta.end_time,
               r.name as region_name, u.username, u.full_name,
-              TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(), ta.expires_at) as hours_remaining
-       FROM temporary_access ta
-       INNER JOIN regions r ON ta.resource_id = r.id AND ta.resource_type = 'region'
+              TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(), ta.end_time) as hours_remaining
+       FROM temporary_access_log ta
+       INNER JOIN regions r ON ta.region_id = r.id 
        INNER JOIN users u ON ta.user_id = u.id
-       WHERE ta.revoked_at IS NULL
-         AND ta.expires_at > UTC_TIMESTAMP()
-         AND TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(), ta.expires_at) BETWEEN 23 AND 25`
+       WHERE ta.status != 'revoked'
+         AND ta.end_time > UTC_TIMESTAMP()
+         AND TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(), ta.end_time) BETWEEN 23 AND 25`
     );
 
     if (expiringAccess.length === 0) {
@@ -130,8 +129,7 @@ const notifyExpiringTemporaryAccess = async () => {
       try {
         // Check if we already sent a notification for this grant
         const [existingNotif] = await pool.query(
-          `SELECT id FROM notifications
-           WHERE user_id = ? AND type = 'region_request'
+          `SELECT id FROM notifications WHERE user_id = ? AND type = 'region_request'
            AND title = '⏰ Temporary Access Expiring Soon'
            AND JSON_EXTRACT(data, '$.grantId') = ?
            AND created_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL 2 DAY)`,
@@ -157,7 +155,7 @@ const notifyExpiringTemporaryAccess = async () => {
           {
             data: {
               grantId: access.id,
-              regionId: access.resource_id,
+              regionId: access.region_id,
               regionName: region_name,
               expiresAt: expires_at,
               hoursRemaining: hours_remaining

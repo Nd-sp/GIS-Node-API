@@ -118,7 +118,7 @@ const getBuildingCache = async (req, res) => {
               buildings_with_height, confidence_score, created_at
        FROM building_cache
        WHERE cache_key = ?
-       AND expires_at > CURRENT_TIMESTAMP`,
+       AND end_time > CURRENT_TIMESTAMP`,
       [cacheKey]
     );
 
@@ -182,7 +182,7 @@ const queryBuildingCache = async (req, res) => {
        FROM building_cache
        WHERE bbox_south <= ? AND bbox_north >= ?
        AND bbox_west <= ? AND bbox_east >= ?
-       AND expires_at > CURRENT_TIMESTAMP
+       AND end_time > CURRENT_TIMESTAMP
        ORDER BY confidence_score DESC
        LIMIT 1`,
       [bbox.north, bbox.south, bbox.east, bbox.west]

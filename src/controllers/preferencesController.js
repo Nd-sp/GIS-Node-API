@@ -119,7 +119,7 @@ const updatePreferences = async (req, res) => {
       const values = [...Object.values(updateFields), userId];
 
       await pool.query(
-        `UPDATE user_map_preferences SET ${updates.join(', ')}, updated_at = NOW() WHERE user_id = ?`,
+        `UPDATE user_map_preferences SET ${updates.join(', ')}, updated_at = NOW() WHERE created_by = ?`,
         values
       );
     }

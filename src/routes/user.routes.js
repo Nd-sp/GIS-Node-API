@@ -1,29 +1,45 @@
 const express = require('express');
 const router = express.Router();
+
+// Import from split user controllers
 const {
   getAllUsers,
   getUserById,
   createUser,
   updateUser,
-  deleteUser,
+  deleteUser
+} = require('../controllers/userController');
+
+const {
   activateUser,
-  deactivateUser,
+  deactivateUser
+} = require('../controllers/userStatusController');
+
+const {
   getUserRegions,
   assignRegion,
-  unassignRegion,
+  unassignRegion
+} = require('../controllers/userRegionController');
+
+const {
   bulkDeleteUsers,
   bulkUpdateStatus,
-  bulkAssignRegions,
+  bulkAssignRegions
+} = require('../controllers/userBulkController');
+
+const {
   resetPassword,
+  resendVerificationEmail,
+  manualVerifyEmail
+} = require('../controllers/userEmailController');
+
+const {
   getUserSessionStats,
   forceLogoutUser,
   sendAdminMessage,
   getUserRecentActivity
-} = require('../controllers/userController');
-const {
-  manualVerifyUserEmail,
-  adminResendVerificationEmail
-} = require('../controllers/authController');
+} = require('../controllers/userSessionController');
+
 const { authenticate, authorize } = require('../middleware/auth');
 
 // All routes require authentication
@@ -65,11 +81,11 @@ router.patch('/:id/deactivate', authorize('admin'), deactivateUser);
 // POST /api/users/:id/reset-password - Reset user password
 router.post('/:id/reset-password', authorize('admin', 'manager'), resetPassword);
 
-// PATCH /api/users/:userId/verify-email - Manually verify user's email (Admin only)
-router.patch('/:userId/verify-email', authorize('admin'), manualVerifyUserEmail);
+// PATCH /api/users/:id/verify-email-manual - Manually verify user's email (Admin only)
+router.post('/:id/verify-email-manual', authorize('admin', 'manager'), manualVerifyEmail);
 
-// POST /api/users/:userId/resend-verification - Resend verification email (Admin only)
-router.post('/:userId/resend-verification', authorize('admin'), adminResendVerificationEmail);
+// POST /api/users/:id/resend-verification - Resend verification email (Admin only)
+router.post('/:id/resend-verification', authorize('admin', 'manager'), resendVerificationEmail);
 
 // GET /api/users/:id/regions - Get user regions
 router.get('/:id/regions', getUserRegions);

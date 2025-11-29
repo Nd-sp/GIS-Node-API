@@ -22,10 +22,10 @@ const getRegionUsageReport = async (req, res) => {
         r.updated_at
       FROM regions r
       LEFT JOIN user_regions ur ON r.id = ur.region_id
-      LEFT JOIN temporary_access ta ON r.id = ta.resource_id 
-        AND ta.resource_type = 'region' 
-        AND ta.expires_at > NOW()
-        AND ta.revoked_at IS NULL
+      LEFT JOIN temporary_access_log ta ON r.id = ta.region_id 
+        
+        AND ta.end_time > NOW()
+        AND ta.status != 'revoked'
       WHERE r.is_active = true
       GROUP BY r.id, r.name, r.code, r.type, r.created_at, r.updated_at
       ORDER BY assigned_users DESC, r.name
@@ -77,9 +77,9 @@ const getUserActivityReport = async (req, res) => {
         u.created_at
       FROM users u
       LEFT JOIN user_regions ur ON u.id = ur.user_id
-      LEFT JOIN temporary_access ta ON u.id = ta.user_id 
-        AND ta.expires_at > NOW()
-        AND ta.revoked_at IS NULL
+      LEFT JOIN temporary_access_log ta ON u.id = ta.user_id 
+        AND ta.end_time > NOW()
+        AND ta.status != 'revoked'
       WHERE u.is_active = true
       GROUP BY u.id
       ORDER BY u.full_name
@@ -176,7 +176,7 @@ const getAuditLogsReport = async (req, res) => {
     const { format = 'json', limit = 1000 } = req.query;
 
     const [logs] = await pool.query(`
-      SELECT 
+      SELECT
         al.id,
         al.user_id,
         u.username,
@@ -186,7 +186,6 @@ const getAuditLogsReport = async (req, res) => {
         al.resource_id,
         al.details,
         al.ip_address,
-        al.user_agent,
         al.created_at
       FROM audit_logs al
       LEFT JOIN users u ON al.user_id = u.id
@@ -240,24 +239,24 @@ const getTemporaryAccessReport = async (req, res) => {
         r.name as region,
         ta.granted_by,
         gb.full_name as granted_by_name,
-        ta.granted_at,
-        ta.expires_at,
+        ta.start_time,
+        ta.end_time,
         ta.revoked_at,
         ta.revoked_by,
         rb.full_name as revoked_by_name,
         ta.reason,
         CASE 
-          WHEN ta.revoked_at IS NOT NULL THEN 'Revoked'
-          WHEN ta.expires_at < NOW() THEN 'Expired'
+          WHEN ta.status = 'revoked' THEN 'Revoked'
+          WHEN ta.end_time < NOW() THEN 'Expired'
           ELSE 'Active'
         END as status,
-        TIMESTAMPDIFF(SECOND, NOW(), ta.expires_at) as seconds_remaining
-      FROM temporary_access ta
+        TIMESTAMPDIFF(SECOND, NOW(), ta.end_time) as seconds_remaining
+      FROM temporary_access_log ta
       INNER JOIN users u ON ta.user_id = u.id
-      INNER JOIN regions r ON ta.resource_id = r.id AND ta.resource_type = 'region'
+      INNER JOIN regions r ON ta.region_id = r.id 
       LEFT JOIN users gb ON ta.granted_by = gb.id
       LEFT JOIN users rb ON ta.revoked_by = rb.id
-      ORDER BY ta.granted_at DESC
+      ORDER BY ta.start_time DESC
     `);
 
     if (format === 'xlsx') {
@@ -421,9 +420,9 @@ const getComprehensiveReport = async (req, res) => {
     const [tempAccessStats] = await pool.query(`
       SELECT 
         COUNT(*) as total,
-        COUNT(CASE WHEN expires_at > NOW() AND revoked_at IS NULL THEN 1 END) as active,
+        COUNT(CASE WHEN end_time > NOW() AND status != 'revoked' THEN 1 END) as active,
         COUNT(CASE WHEN revoked_at IS NOT NULL THEN 1 END) as revoked
-      FROM temporary_access
+      FROM temporary_access_log
     `);
     const [requestStats] = await pool.query(`
       SELECT 
@@ -512,7 +511,7 @@ const getComprehensiveReport = async (req, res) => {
 /**
  * Helper: Generate XLSX file
  */
-function generateXLSX(res, data, reportName, columns) {
+function generateXLSX(res, reportName, columns) {
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(data, { header: columns.map(c => c.key) });
   
@@ -531,7 +530,7 @@ function generateXLSX(res, data, reportName, columns) {
 /**
  * Helper: Generate CSV file
  */
-function generateCSV(res, data, reportName) {
+function generateCSV(res, reportName) {
   if (data.length === 0) {
     return res.status(404).json({ success: false, error: 'No data available' });
   }

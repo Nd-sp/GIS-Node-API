@@ -11,7 +11,7 @@ const getAllLayers = async (req, res) => {
     const { regionId, layer_type } = req.query;
 
     let query = `SELECT * FROM layer_management
-                 WHERE user_id = ? OR is_public = true
+                 WHERE created_by = ? OR is_public = true
                  OR JSON_CONTAINS(shared_with, ?)`;
     const params = [userId, JSON.stringify(userId)];
 

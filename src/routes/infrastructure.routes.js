@@ -2,25 +2,39 @@ const express = require("express");
 const router = express.Router();
 const { authenticate, authorize } = require("../middleware/auth");
 const { cacheMiddleware, clearCacheOnMutation } = require("../middleware/cache");
+
+// Import from split controllers
 const {
   getAllInfrastructure,
   getInfrastructureById,
-  getInfrastructureByViewport,
   createInfrastructure,
   updateInfrastructure,
-  deleteInfrastructure,
+  deleteInfrastructure
+} = require("../controllers/infrastructureController");
+
+const {
+  getInfrastructureByViewport
+} = require("../controllers/infrastructureViewportController");
+
+const {
   importKML,
   getImportPreview,
   saveImportedItems,
   saveSingleImportedItem,
-  deleteImportSession,
+  deleteImportSession
+} = require("../controllers/infrastructureKmlController");
+
+const {
+  getMapViewInfrastructure,
+  getClusters
+} = require("../controllers/infrastructureMapController");
+
+const {
   getInfrastructureStats,
   getCategories,
-  getMapViewInfrastructure,
-  getClusters,
   validateCoordinates,
   debugGetCounts
-} = require("../controllers/infrastructureController");
+} = require("../controllers/infrastructureStatsController");
 const {
   getInfrastructureAuditLogs,
   getInfrastructureAuditLogById,

@@ -11,8 +11,7 @@ const getAllRegions = async (req, res) => {
     const userId = req.user.id;
 
     let query = `
-      SELECT DISTINCT r.id, r.name, r.code, r.type, r.parent_region_id,
-             r.latitude, r.longitude, r.description, r.is_active, r.created_at
+      SELECT DISTINCT r.id, r.name, r.code, r.type, r.parent_id, r.created_at, r.updated_at
       FROM regions r
     `;
 
@@ -20,10 +19,10 @@ const getAllRegions = async (req, res) => {
 
     // Admin sees all regions, others see only their assigned regions
     if (req.user.role !== 'admin') {
-      query += ` INNER JOIN user_regions ur ON r.id = ur.region_id WHERE ur.user_id = ? AND r.is_active = true`;
+      query += ` INNER JOIN user_regions ur ON r.id = ur.region_id WHERE ur.user_id = ?`;
       params.push(userId);
     } else {
-      query += ' WHERE r.is_active = true';
+      query += ' WHERE 1=1';
     }
 
     // Type filter
@@ -34,7 +33,7 @@ const getAllRegions = async (req, res) => {
 
     // Parent filter
     if (parentId) {
-      query += ' AND r.parent_region_id = ?';
+      query += ' AND r.parent_id = ?';
       params.push(parentId);
     }
 
@@ -251,7 +250,7 @@ const getRegionHierarchy = async (req, res) => {
     // Build hierarchy tree
     const buildTree = (parentId = null) => {
       return regions
-        .filter(r => r.parent_region_id === parentId)
+        .filter(r => r.parent_id === parentId)
         .map(r => ({
           ...r,
           children: buildTree(r.id)

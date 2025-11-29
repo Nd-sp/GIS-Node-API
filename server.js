@@ -4,7 +4,9 @@ const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
 const rateLimit = require("express-rate-limit");
-require("dotenv").config();
+
+// Load environment-specific configuration FIRST
+const { env, isProduction, isDevelopment } = require("./src/config/environment");
 
 const { testConnection } = require("./src/config/database");
 const { errorHandler, notFound } = require("./src/middleware/errorHandler");
@@ -85,14 +87,17 @@ const limiter = rateLimit({
       '/measurements',
       '/drawings',
       '/rf',
+      '/fiber-rings',
       '/elevation',
       '/infrastructure',
       '/analytics',
       '/notifications',
       '/regions',
-      '/search'
+      '/search',
+      '/user-map-preferences', // Map preferences for each user
+      '/boundaries' // Region boundaries for map layers
     ];
-    // Check if request path starts with any skip path
+    // Check if request path starts with any skip path (without /api/ prefix)
     return skipPaths.some(path => req.path.startsWith(path));
   }
 });
@@ -164,119 +169,70 @@ app.post("/api/cache/clear", (req, res) => {
   });
 });
 
-// Import and use routes
-try {
-  // Authentication routes
-  const authRoutes = require("./src/routes/auth.routes");
-  app.use("/api/auth", authRoutes);
+// Import and use routes - with individual error handling
+const routes = [
+  // Public routes (no auth) - Load these first
+  { name: "auth", path: "./src/routes/auth.routes", mount: "/api/auth" },
+  { name: "passwordResetRequests", path: "./src/routes/passwordResetRequest.routes", mount: "/api/password-reset-requests" },
 
-  // User routes
-  const userRoutes = require("./src/routes/user.routes");
-  app.use("/api/users", userRoutes);
+  // Authenticated routes
+  { name: "mfa", path: "./src/routes/mfaRoutes", mount: "/api/mfa" },
+  { name: "users", path: "./src/routes/user.routes", mount: "/api/users" },
+  { name: "regions", path: "./src/routes/region.routes", mount: "/api/regions" },
+  { name: "boundaryVersions", path: "./src/routes/boundaryVersionRoutes", mount: "/api/regions" },
+  { name: "boundaryPublic", path: "./src/routes/boundaryPublicRoutes", mount: "/api/boundaries" },
+  { name: "groups", path: "./src/routes/group.routes", mount: "/api/groups" },
+  { name: "features", path: "./src/routes/feature.routes", mount: "/api/features" },
+  { name: "distance", path: "./src/routes/distanceMeasurement.routes", mount: "/api/measurements/distance" },
+  { name: "polygon", path: "./src/routes/polygonDrawing.routes", mount: "/api/drawings/polygon" },
+  { name: "circle", path: "./src/routes/circleDrawing.routes", mount: "/api/drawings/circle" },
+  { name: "sectorRF", path: "./src/routes/sectorRF.routes", mount: "/api/rf/sectors" },
+  { name: "elevation", path: "./src/routes/elevationProfile.routes", mount: "/api/elevation" },
+  { name: "buildingCache", path: "./src/routes/buildingCache.routes", mount: "/api/building-cache" },
+  { name: "infrastructure", path: "./src/routes/infrastructure.routes", mount: "/api/infrastructure" },
+  { name: "layers", path: "./src/routes/layerManagement.routes", mount: "/api/layers" },
+  { name: "bookmarks", path: "./src/routes/bookmark.routes", mount: "/api/bookmarks" },
+  { name: "search", path: "./src/routes/search.routes", mount: "/api/search" },
+  { name: "analytics", path: "./src/routes/analytics.routes", mount: "/api/analytics" },
+  { name: "audit", path: "./src/routes/audit.routes", mount: "/api/audit" },
+  { name: "preferences", path: "./src/routes/preferences.routes", mount: "/api/preferences" },
+  { name: "datahub", path: "./src/routes/dataHub.routes", mount: "/api/datahub" },
+  { name: "temporaryAccess", path: "./src/routes/temporaryAccess.routes", mount: "/api/temporary-access" },
+  { name: "regionRequests", path: "./src/routes/regionRequest.routes", mount: "/api/region-requests" },
+  { name: "permissions", path: "./src/routes/permission.routes", mount: "/api/permissions" },
+  { name: "reports", path: "./src/routes/reports.routes", mount: "/api/reports" },
+  { name: "userMapPreferences", path: "./src/routes/userMapPreferences.routes", mount: "/api/user-map-preferences" },
+  { name: "searchHistory", path: "./src/routes/searchHistory.routes", mount: "/api/search-history" },
+  { name: "notifications", path: "./src/routes/notification.routes", mount: "/api/notifications" },
+  { name: "devTools", path: "./src/routes/devToolsRoutes", mount: "/api/dev-tools" },
 
-  // Region routes
-  const regionRoutes = require("./src/routes/region.routes");
-  app.use("/api/regions", regionRoutes);
+  // Routes mounted at /api - Load these LAST to avoid intercepting specific routes
+  { name: "groupPermissions", path: "./src/routes/groupPermission.routes", mount: "/api" },
+  { name: "userPermissions", path: "./src/routes/userPermission.routes", mount: "/api" },
+  { name: "fiberRings", path: "./src/routes/fiberRingRoutes", mount: "/api" }
+];
 
-  // Group routes
-  const groupRoutes = require("./src/routes/group.routes");
-  app.use("/api/groups", groupRoutes);
+let loadedCount = 0;
+let failedRoutes = [];
 
-  // GIS Features routes
-  const featureRoutes = require("./src/routes/feature.routes");
-  app.use("/api/features", featureRoutes);
+routes.forEach(({ name, path, mount }) => {
+  try {
+    const routeModule = require(path);
+    app.use(mount, routeModule);
+    loadedCount++;
+  } catch (error) {
+    console.error(`❌ Failed to load ${name} routes (${mount}):`, error.message);
+    failedRoutes.push({ name, mount, error: error.message });
+  }
+});
 
-  // Distance Measurement routes
-  const distanceRoutes = require("./src/routes/distanceMeasurement.routes");
-  app.use("/api/measurements/distance", distanceRoutes);
-
-  // Polygon Drawing routes
-  const polygonRoutes = require("./src/routes/polygonDrawing.routes");
-  app.use("/api/drawings/polygon", polygonRoutes);
-
-  // Circle Drawing routes
-  const circleRoutes = require("./src/routes/circleDrawing.routes");
-  app.use("/api/drawings/circle", circleRoutes);
-
-  // SectorRF routes
-  const sectorRoutes = require("./src/routes/sectorRF.routes");
-  app.use("/api/rf/sectors", sectorRoutes);
-
-  // Elevation Profile routes
-  const elevationRoutes = require("./src/routes/elevationProfile.routes");
-  app.use("/api/elevation", elevationRoutes);
-
-  // Building Cache routes (for LOS analysis)
-  const buildingCacheRoutes = require("./src/routes/buildingCache.routes");
-  app.use("/api/building-cache", buildingCacheRoutes);
-
-  // Infrastructure routes
-  const infrastructureRoutes = require("./src/routes/infrastructure.routes");
-  app.use("/api/infrastructure", infrastructureRoutes);
-
-  // Layer Management routes
-  const layerRoutes = require("./src/routes/layerManagement.routes");
-  app.use("/api/layers", layerRoutes);
-
-  // Bookmark routes
-  const bookmarkRoutes = require("./src/routes/bookmark.routes");
-  app.use("/api/bookmarks", bookmarkRoutes);
-
-  // Search routes
-  const searchRoutes = require("./src/routes/search.routes");
-  app.use("/api/search", searchRoutes);
-
-  // Analytics routes
-  const analyticsRoutes = require("./src/routes/analytics.routes");
-  app.use("/api/analytics", analyticsRoutes);
-
-  // Audit routes
-  const auditRoutes = require("./src/routes/audit.routes");
-  app.use("/api/audit", auditRoutes);
-
-  // User Preferences routes
-  const preferencesRoutes = require("./src/routes/preferences.routes");
-  app.use("/api/preferences", preferencesRoutes);
-
-  // Data Hub routes
-  const dataHubRoutes = require("./src/routes/dataHub.routes");
-  app.use("/api/datahub", dataHubRoutes);
-
-  // Temporary Access routes
-  const temporaryAccessRoutes = require("./src/routes/temporaryAccess.routes");
-  app.use("/api/temporary-access", temporaryAccessRoutes);
-
-  // Region Request routes
-  const regionRequestRoutes = require("./src/routes/regionRequest.routes");
-  app.use("/api/region-requests", regionRequestRoutes);
-
-  // Permission routes
-  const permissionRoutes = require("./src/routes/permission.routes");
-  app.use("/api/permissions", permissionRoutes);
-
-  // Reports routes
-  const reportsRoutes = require("./src/routes/reports.routes");
-  app.use("/api/reports", reportsRoutes);
-
-  // User Map Preferences routes
-  const userMapPreferencesRoutes = require("./src/routes/userMapPreferences.routes");
-  app.use("/api/user-map-preferences", userMapPreferencesRoutes);
-
-  // Search History routes
-  const searchHistoryRoutes = require("./src/routes/searchHistory.routes");
-  app.use("/api/search-history", searchHistoryRoutes);
-
-  // Notification routes
-  const notificationRoutes = require("./src/routes/notification.routes");
-  app.use("/api/notifications", notificationRoutes);
-
-  // Password Reset Request routes
-  const passwordResetRequestRoutes = require("./src/routes/passwordResetRequest.routes");
-  app.use("/api/password-reset-requests", passwordResetRequestRoutes);
-
-  console.log("✅ All routes loaded successfully");
-} catch (error) {
-  console.warn("⚠️ Some routes not loaded yet:", error.message);
+if (failedRoutes.length === 0) {
+  console.log(`✅ All ${loadedCount} routes loaded successfully`);
+} else {
+  console.warn(`⚠️ ${loadedCount}/${routes.length} routes loaded. ${failedRoutes.length} failed:`);
+  failedRoutes.forEach(({ name, mount, error }) => {
+    console.warn(`   - ${name} (${mount}): ${error}`);
+  });
 }
 
 // 404 handler
@@ -310,20 +266,52 @@ const startServer = async () => {
     // Initialize WebSocket server
     websocketServer.initialize(server);
 
+    // Get local IP address for network access
+    const os = require('os');
+    const networkInterfaces = os.networkInterfaces();
+    let localIP = null;
+
+    for (const interfaceName in networkInterfaces) {
+      const interfaces = networkInterfaces[interfaceName];
+      for (const iface of interfaces) {
+        // Skip internal (loopback) and non-IPv4 addresses
+        if (iface.family === 'IPv4' && !iface.internal) {
+          localIP = iface.address;
+          break;
+        }
+      }
+      if (localIP) break;
+    }
+
     // Start HTTP server (Express + WebSocket)
-    server.listen(PORT, () => {
+    const HOST = process.env.HOST || '0.0.0.0';
+    server.listen(PORT, HOST, () => {
       console.log("\n" + "=".repeat(60));
-      console.log("🚀 PersonalGIS Backend Server Started Successfully!");
+      console.log("🚀 OptiConnect GIS Backend Server Started Successfully!");
       console.log("=".repeat(60));
       console.log(`📡 HTTP Server: http://localhost:${PORT}`);
       console.log(`🔌 WebSocket Server: ws://localhost:${PORT}/ws`);
-      console.log(`🌍 Environment: ${process.env.NODE_ENV}`);
-      console.log(`📊 Database: ${process.env.DB_NAME}`);
+      console.log(`🌍 Environment: ${env}`);
+      console.log(`📊 Database: ${process.env.DB_NAME} @ ${process.env.DB_HOST}`);
       console.log(`🔒 CORS Enabled: ${process.env.FRONTEND_URL}`);
-      console.log("=".repeat(60) + "\n");
+      console.log("=".repeat(60));
+      console.log("  Access URLs:");
+      console.log("=".repeat(60));
+      console.log(`  Local (this computer):   http://localhost:${PORT}`);
+      if (localIP) {
+        console.log(`  Network (other devices): http://${localIP}:${PORT}`);
+        console.log("");
+        console.log("  📱 TO ACCESS FROM ANOTHER LAPTOP:");
+        console.log(`     1. Connect laptop to same Wi-Fi/network`);
+        console.log(`     2. Open browser and go to: http://${localIP}:${PORT}`);
+        console.log(`     3. Frontend should use: http://${localIP}:${PORT}/api`);
+        console.log(`     4. WebSocket should use: ws://${localIP}:${PORT}/ws`);
+      }
+      console.log("=".repeat(60));
       console.log("📚 API Documentation: http://localhost:" + PORT + "/");
       console.log("💚 Health Check: http://localhost:" + PORT + "/api/health");
-      console.log("\n🔥 Server is ready to accept requests!\n");
+      console.log("=".repeat(60) + "\n");
+      console.log("🔥 Server is ready to accept requests!\n");
     });
   } catch (error) {
     console.error("Failed to start server:", error);

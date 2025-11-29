@@ -24,7 +24,7 @@ const globalSearch = async (req, res) => {
     const [infrastructure] = await pool.query(
       `SELECT id, item_name, item_type, latitude, longitude
        FROM infrastructure_items
-       WHERE user_id = ? AND item_name LIKE ?
+       WHERE created_by = ? AND item_name LIKE ?
        LIMIT 10`,
       [userId, searchTerm]
     );
@@ -35,7 +35,7 @@ const globalSearch = async (req, res) => {
       `SELECT id, measurement_name, total_distance, points,
               elevation_data, max_elevation, min_elevation, elevation_gain, elevation_loss
        FROM distance_measurements
-       WHERE user_id = ? AND measurement_name LIKE ?
+       WHERE created_by = ? AND measurement_name LIKE ?
        LIMIT 10`,
       [userId, searchTerm]
     );
@@ -45,7 +45,7 @@ const globalSearch = async (req, res) => {
     const [bookmarks] = await pool.query(
       `SELECT id, name, latitude, longitude
        FROM bookmarks
-       WHERE user_id = ? AND name LIKE ?
+       WHERE created_by = ? AND name LIKE ?
        LIMIT 10`,
       [userId, searchTerm]
     );
@@ -55,7 +55,7 @@ const globalSearch = async (req, res) => {
     const [layers] = await pool.query(
       `SELECT id, layer_name, layer_type
        FROM layer_management
-       WHERE user_id = ? AND layer_name LIKE ?
+       WHERE created_by = ? AND layer_name LIKE ?
        LIMIT 10`,
       [userId, searchTerm]
     );
@@ -180,7 +180,7 @@ const searchFeatures = async (req, res) => {
     const [features] = await pool.query(
       `SELECT id, name, feature_type, latitude, longitude
        FROM gis_features
-       WHERE user_id = ? AND (name LIKE ? OR description LIKE ?)
+       WHERE created_by = ? AND (name LIKE ? OR description LIKE ?)
        LIMIT 20`,
       [userId, searchTerm, searchTerm]
     );
@@ -235,7 +235,7 @@ const searchSavedData = async (req, res) => {
         `SELECT id, item_name as name, item_type as type, latitude, longitude,
                 address_street, address_city, address_state, address_pincode, notes, created_at, user_id
          FROM infrastructure_items
-         WHERE user_id = ? AND (item_name LIKE ? OR notes LIKE ?)
+         WHERE created_by = ? AND (item_name LIKE ? OR notes LIKE ?)
          ORDER BY created_at DESC
          LIMIT 20`,
         [searchUserId, searchTerm, searchTerm]
@@ -252,7 +252,7 @@ const searchSavedData = async (req, res) => {
               elevation_data, max_elevation, min_elevation, elevation_gain, elevation_loss,
               created_at, user_id
        FROM distance_measurements
-       WHERE user_id = ? AND measurement_name LIKE ?
+       WHERE created_by = ? AND measurement_name LIKE ?
        ORDER BY created_at DESC
        LIMIT 20`,
       [searchUserId, searchTerm]
@@ -268,7 +268,7 @@ const searchSavedData = async (req, res) => {
       `SELECT id, polygon_name as name, vertices, area, perimeter,
               stroke_color, fill_color, opacity, created_at, user_id
        FROM polygon_drawings
-       WHERE user_id = ? AND polygon_name LIKE ?
+       WHERE created_by = ? AND polygon_name LIKE ?
        ORDER BY created_at DESC
        LIMIT 20`,
       [searchUserId, searchTerm]
@@ -285,7 +285,7 @@ const searchSavedData = async (req, res) => {
       `SELECT id, circle_name as name, center_lat, center_lng, radius, area,
               stroke_color, fill_color, opacity, created_at, user_id
        FROM circle_drawings
-       WHERE user_id = ? AND circle_name LIKE ?
+       WHERE created_by = ? AND circle_name LIKE ?
        ORDER BY created_at DESC
        LIMIT 20`,
       [searchUserId, searchTerm]
@@ -302,7 +302,7 @@ const searchSavedData = async (req, res) => {
               total_distance, min_elevation, max_elevation, elevation_gain,
               elevation_loss, notes, created_at, user_id
        FROM elevation_profiles
-       WHERE user_id = ? AND profile_name LIKE ?
+       WHERE created_by = ? AND profile_name LIKE ?
        ORDER BY created_at DESC
        LIMIT 20`,
       [searchUserId, searchTerm]
@@ -315,7 +315,7 @@ const searchSavedData = async (req, res) => {
       `SELECT id, sector_name as name, tower_lat, tower_lng, radius, start_angle, end_angle,
               stroke_color, fill_color, opacity, azimuth, beamwidth, created_at, user_id
        FROM sector_rf_data
-       WHERE user_id = ? AND sector_name LIKE ?
+       WHERE created_by = ? AND sector_name LIKE ?
        ORDER BY created_at DESC
        LIMIT 20`,
       [searchUserId, searchTerm]
@@ -389,7 +389,7 @@ const getSearchHistory = async (req, res) => {
     const [history] = await pool.query(
       `SELECT id, query, created_at
        FROM search_history
-       WHERE user_id = ?
+       WHERE created_by = ?
        ORDER BY created_at DESC
        LIMIT ?`,
       [userId, parseInt(limit)]

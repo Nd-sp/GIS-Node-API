@@ -10,7 +10,7 @@ const getAllBookmarks = async (req, res) => {
     const userId = req.user.id;
 
     const [bookmarks] = await pool.query(
-      'SELECT * FROM bookmarks WHERE user_id = ? ORDER BY created_at DESC',
+      'SELECT * FROM bookmarks WHERE created_by = ? ORDER BY created_at DESC',
       [userId]
     );
 

@@ -70,22 +70,22 @@ const getAllTemporaryAccess = async (req, res) => {
              r.name as region_name,
              r.code as region_code,
              granter.username as granted_by_username,
-             TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), ta.expires_at) as seconds_remaining
-      FROM temporary_access ta
+             TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), ta.end_time) as seconds_remaining
+      FROM temporary_access_log ta
       INNER JOIN users u ON ta.user_id = u.id
-      INNER JOIN regions r ON ta.resource_id = r.id
+      INNER JOIN regions r ON ta.region_id = r.id
       INNER JOIN users granter ON ta.granted_by = granter.id
-      WHERE ta.resource_type = 'region'
+      WHERE 1=1
     `;
     const params = [];
 
     if (status) {
       if (status === 'active') {
-        query += ' AND ta.revoked_at IS NULL AND ta.expires_at > UTC_TIMESTAMP()';
+        query += ' AND ta.status != \'revoked\' AND ta.end_time > UTC_TIMESTAMP()';
       } else if (status === 'revoked') {
-        query += ' AND ta.revoked_at IS NOT NULL';
+        query += ' AND ta.status = \'revoked\'';
       } else if (status === 'expired') {
-        query += ' AND ta.revoked_at IS NULL AND ta.expires_at <= UTC_TIMESTAMP()';
+        query += ' AND ta.status != \'revoked\' AND ta.end_time <= UTC_TIMESTAMP()';
       }
     }
 
@@ -94,7 +94,7 @@ const getAllTemporaryAccess = async (req, res) => {
       params.push(user_id);
     }
 
-    query += ' ORDER BY ta.granted_at DESC';
+    query += ' ORDER BY ta.start_time DESC';
 
     const [access] = await pool.query(query, params);
 
@@ -167,9 +167,9 @@ const grantTemporaryAccess = async (req, res) => {
 
     // Check if active temporary access already exists
     const [existingTemp] = await pool.query(
-      `SELECT id FROM temporary_access
-       WHERE user_id = ? AND resource_type = 'region' AND resource_id = ?
-       AND revoked_at IS NULL AND expires_at > UTC_TIMESTAMP()`,
+      `SELECT id FROM temporary_access_log
+       WHERE user_id = ? AND region_id = ?
+       AND status != 'revoked' AND end_time > UTC_TIMESTAMP()`,
       [user_id, regionId]
     );
 
@@ -193,13 +193,12 @@ const grantTemporaryAccess = async (req, res) => {
     console.log('🕐 Difference from now (minutes):', Math.round((expiresDate - new Date()) / 60000));
 
     const [result] = await pool.query(
-      `INSERT INTO temporary_access
-       (user_id, resource_type, resource_id, access_level, reason, granted_by, expires_at)
-       VALUES (?, 'region', ?, ?, ?, ?, ?)`,
+      `INSERT INTO temporary_access_log
+       (user_id, region_id, reason, granted_by, end_time)
+       VALUES (?, ?, ?, ?, ?)`,
       [
         user_id,
         regionId,
-        access_level || 'read',
         reason,
         granterId,
         mysqlDateTime
@@ -327,12 +326,12 @@ const revokeTemporaryAccess = async (req, res) => {
 
     // Get the grant details before deleting (with user and region info for audit log)
     const [access] = await pool.query(
-      `SELECT ta.user_id, ta.resource_id, ta.revoked_at, ta.reason as grant_reason,
+      `SELECT ta.user_id, ta.region_id,  ta.reason as grant_reason,
               u.username, u.full_name, u.email,
               r.name as region_name
-       FROM temporary_access ta
+       FROM temporary_access_log ta
        INNER JOIN users u ON ta.user_id = u.id
-       INNER JOIN regions r ON ta.resource_id = r.id
+       INNER JOIN regions r ON ta.region_id = r.id
        WHERE ta.id = ?`,
       [id]
     );
@@ -342,7 +341,7 @@ const revokeTemporaryAccess = async (req, res) => {
     }
 
     const grantUserId = access[0].user_id;
-    const grantResourceId = access[0].resource_id;
+    const grantResourceId = access[0].region_id;
     const targetUser = {
       id: access[0].user_id,
       username: access[0].username,
@@ -352,7 +351,7 @@ const revokeTemporaryAccess = async (req, res) => {
     const regionName = access[0].region_name;
 
     // Delete the temporary access record from database
-    await pool.query('DELETE FROM temporary_access WHERE id = ?', [id]);
+    await pool.query('DELETE FROM temporary_access_log WHERE id = ?', [id]);
     console.log(`✅ Deleted temporary access ID: ${id} from database`);
     console.log(`   Revoked by: ${req.user.username || userId} (ID: ${userId})`);
     console.log(`   Target user: ${targetUser.full_name} (ID: ${grantUserId})`);
@@ -411,9 +410,9 @@ const revokeTemporaryAccess = async (req, res) => {
     // Remove from user_regions table (only if no other active temporary access exists)
     // Check if there's any other active temporary access for this region
     const [otherTemp] = await pool.query(
-      `SELECT id FROM temporary_access
-       WHERE user_id = ? AND resource_id = ? AND resource_type = 'region'
-       AND revoked_at IS NULL AND expires_at > UTC_TIMESTAMP()`,
+      `SELECT id FROM temporary_access_log
+       WHERE created_by = ? AND region_id = ?
+       AND status != 'revoked' AND end_time > UTC_TIMESTAMP()`,
       [grantUserId, grantResourceId]
     );
 
@@ -449,15 +448,15 @@ const getMyTemporaryAccess = async (req, res) => {
              r.type as region_type,
              granter.username as granted_by_username,
              granter.full_name as granted_by_name,
-             TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), ta.expires_at) as seconds_remaining
-      FROM temporary_access ta
-      INNER JOIN regions r ON ta.resource_id = r.id
+             TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), ta.end_time) as seconds_remaining
+      FROM temporary_access_log ta
+      INNER JOIN regions r ON ta.region_id = r.id
       INNER JOIN users granter ON ta.granted_by = granter.id
       WHERE ta.user_id = ?
-        AND ta.resource_type = 'region'
-        AND ta.revoked_at IS NULL
-        AND ta.expires_at > UTC_TIMESTAMP()
-      ORDER BY ta.expires_at ASC
+        
+        AND ta.status != 'revoked'
+        AND ta.end_time > UTC_TIMESTAMP()
+      ORDER BY ta.end_time ASC
     `;
 
     const [access] = await pool.query(query, [userId]);
@@ -490,25 +489,21 @@ const getCurrentValidRegions = async (req, res) => {
 
     // Step 1: Get all region IDs that have EVER had temporary access
     const [allTempRegions] = await pool.query(
-      `SELECT DISTINCT resource_id FROM temporary_access
-       WHERE user_id = ? AND resource_type = 'region'`,
+      `SELECT DISTINCT region_id FROM temporary_access_log WHERE user_id = ?`,
       [userId]
     );
-    const everTempRegionIds = allTempRegions.map(ta => ta.resource_id);
+    const everTempRegionIds = allTempRegions.map(ta => ta.region_id);
 
     // Step 2: Get all active temporary access (currently valid)
     const [activeTempAccess] = await pool.query(
-      `SELECT resource_id, expires_at,
-              TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), expires_at) as seconds_remaining
-       FROM temporary_access
-       WHERE user_id = ? AND resource_type = 'region'
-       AND revoked_at IS NULL AND expires_at > UTC_TIMESTAMP()`,
+      `SELECT region_id, end_time, TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), end_time) as seconds_remaining FROM temporary_access_log WHERE user_id = ?
+       AND status != 'revoked' AND end_time > UTC_TIMESTAMP()`,
       [userId]
     );
-    const activeTempRegionIds = activeTempAccess.map(ta => ta.resource_id);
+    const activeTempRegionIds = activeTempAccess.map(ta => ta.region_id);
     const tempRegionMap = new Map(activeTempAccess.map(ta => [
-      ta.resource_id,
-      { expires_at: ta.expires_at, seconds_remaining: ta.seconds_remaining }
+      ta.region_id,
+      { expires_at: ta.end_time, seconds_remaining: ta.seconds_remaining }
     ]));
 
     // Step 3: Get ALL regions from user_regions
@@ -550,7 +545,7 @@ const getCurrentValidRegions = async (req, res) => {
           type: region.type,
           access_level: region.access_level,
           is_temporary: isTemporary,
-          expires_at: isTemporary && tempData ? tempData.expires_at : null,
+          expires_at: isTemporary && tempData ? tempData.end_time : null,
           time_remaining: isTemporary && tempData
             ? calculateTimeRemaining(tempData.seconds_remaining)
             : null

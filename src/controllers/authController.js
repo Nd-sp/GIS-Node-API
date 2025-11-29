@@ -1,8 +1,15 @@
 const { pool } = require('../config/database');
 const { hashPassword, comparePassword } = require('../utils/bcrypt');
 const { generateToken, generateRefreshToken, verifyEmailToken } = require('../utils/jwt');
-const { sendVerificationEmail } = require('../services/emailService');
+const { sendVerificationEmail, send2FACode } = require('../services/emailService');
 const { notifyAllAdmins } = require('./notificationController');
+
+/**
+ * Generate a random 6-digit code for 2FA
+ */
+const generate2FACode = () => {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+};
 
 /**
  * @route   POST /api/auth/login
@@ -32,14 +39,26 @@ const login = async (req, res) => {
 
     if (isNumeric) {
       // Search by ID, username, or email
-      query = `SELECT u.*, creator.full_name as created_by_name
+      // Convert timestamps to UTC for consistent timezone handling
+      query = `SELECT u.*, creator.full_name as created_by_name,
+               CONVERT_TZ(u.last_login, @@session.time_zone, '+00:00') as last_login_utc,
+               CONVERT_TZ(u.created_at, @@session.time_zone, '+00:00') as created_at_utc,
+               CONVERT_TZ(u.updated_at, @@session.time_zone, '+00:00') as updated_at_utc,
+               CONVERT_TZ(u.email_verified_at, @@session.time_zone, '+00:00') as email_verified_at_utc,
+               CONVERT_TZ(u.mfa_enabled_at, @@session.time_zone, '+00:00') as mfa_enabled_at_utc
                FROM users u
                LEFT JOIN users creator ON u.created_by = creator.id
                WHERE u.id = ? OR u.username = ? OR u.email = ?`;
       params = [parseInt(email), email, email];
     } else {
       // Search by email or username
-      query = `SELECT u.*, creator.full_name as created_by_name
+      // Convert timestamps to UTC for consistent timezone handling
+      query = `SELECT u.*, creator.full_name as created_by_name,
+               CONVERT_TZ(u.last_login, @@session.time_zone, '+00:00') as last_login_utc,
+               CONVERT_TZ(u.created_at, @@session.time_zone, '+00:00') as created_at_utc,
+               CONVERT_TZ(u.updated_at, @@session.time_zone, '+00:00') as updated_at_utc,
+               CONVERT_TZ(u.email_verified_at, @@session.time_zone, '+00:00') as email_verified_at_utc,
+               CONVERT_TZ(u.mfa_enabled_at, @@session.time_zone, '+00:00') as mfa_enabled_at_utc
                FROM users u
                LEFT JOIN users creator ON u.created_by = creator.id
                WHERE u.email = ? OR u.username = ?`;
@@ -49,7 +68,6 @@ const login = async (req, res) => {
     const [users] = await pool.query(query, params);
 
     if (users.length === 0) {
-      console.log('❌ Login failed: User not found');
       return res.status(401).json({
         success: false,
         error: 'Invalid credentials'
@@ -57,11 +75,9 @@ const login = async (req, res) => {
     }
 
     const user = users[0];
-    console.log(`✅ User found: ${user.username} (ID: ${user.id})`);
 
     // Check if user is active
     if (!user.is_active) {
-      console.log('❌ Login failed: Account deactivated');
       return res.status(401).json({
         success: false,
         error: 'Account is deactivated. Please contact administrator.'
@@ -70,7 +86,6 @@ const login = async (req, res) => {
 
     // Check if email is verified
     if (!user.is_email_verified) {
-      console.log('❌ Login failed: Email not verified');
       return res.status(401).json({
         success: false,
         error: 'Please verify your email address before logging in. Check your email for the verification link.',
@@ -80,18 +95,63 @@ const login = async (req, res) => {
     }
 
     // Compare password
-    console.log('🔐 Comparing passwords...');
     const isPasswordValid = await comparePassword(password, user.password_hash);
 
     if (!isPasswordValid) {
-      console.log('❌ Login failed: Invalid password');
       return res.status(401).json({
         success: false,
         error: 'Invalid email or password'
       });
     }
 
-    console.log('✅ Password valid, login successful');
+    // 🔐 CHECK IF 2FA IS ENABLED
+    if (user.mfa_enabled) {
+
+      // Invalidate any previous unused codes
+      await pool.query(
+        'UPDATE mfa_tokens SET is_used = TRUE WHERE created_by = ? AND is_used = FALSE',
+        [user.id]
+      );
+
+      // Generate new 2FA code
+      const code = generate2FACode();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+      // Store code in database
+      await pool.query(
+        `INSERT INTO mfa_tokens (user_id, token, expires_at, ip_address, user_agent)
+         VALUES (?, ?, ?, ?, ?)`,
+        [user.id, code, expiresAt, req.ip, req.headers['user-agent']]
+      );
+
+      // Send code via email
+      try {
+        await send2FACode(user.email, user.full_name, code);
+      } catch (emailError) {
+        console.error('Failed to send 2FA code:', emailError);
+        return res.status(500).json({
+          success: false,
+          error: 'Failed to send verification code. Please try again.'
+        });
+      }
+
+      // Log audit event
+      await pool.query(
+        `INSERT INTO audit_logs (user_id, action, resource_type, resource_id, ip_address)
+         VALUES (?, '2FA_CODE_SENT', 'user', ?, ?)`,
+        [user.id, user.id, req.ip]
+      );
+
+      // Return response indicating 2FA is required
+      return res.json({
+        success: true,
+        require2FA: true,
+        userId: user.id,
+        email: user.email.replace(/(.{2})(.*)(@.*)/, '$1***$3'), // Mask email
+        message: 'Verification code sent to your email',
+        expiresIn: 600 // seconds
+      });
+    }
 
     // Update last login time and set online status
     await pool.query(
@@ -131,11 +191,10 @@ const login = async (req, res) => {
       expiresAt.setDate(expiresAt.getDate() + 7);
 
       await pool.query(
-        `INSERT INTO user_sessions (session_token, user_id, ip_address, device_info, expires_at)
-         VALUES (?, ?, ?, ?, ?)`,
-        [sessionToken, user.id, ipAddress, deviceInfo, expiresAt]
+        `INSERT INTO user_sessions (session_token, user_id, token, ip_address, user_agent, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [sessionToken, user.id, token, ipAddress, deviceInfo, expiresAt]
       );
-      console.log(`✅ Session created for user ${user.username}`);
     } catch (sessionError) {
       console.error('Failed to create session record:', sessionError);
       // Don't fail login if session tracking fails
@@ -143,16 +202,9 @@ const login = async (req, res) => {
 
     // Map regions to just names for frontend
     const assignedRegions = regions.map(r => r.name);
-    
-    // Debug logging for login regions
-    console.log(`🔐 LOGIN - User: ${user.username} (ID: ${user.id})`);
-    console.log(`   Regions from DB: ${regions.length}`);
-    console.log(`   Regions being sent: ${assignedRegions.length}`);
-    if (assignedRegions.length !== regions.length) {
-      console.error(`   ⚠️  MISMATCH: DB has ${regions.length} but sending ${assignedRegions.length}`);
-    }
 
     // Return user data and token
+    // Use UTC-converted timestamps from MySQL query
     res.json({
       success: true,
       token,
@@ -184,12 +236,28 @@ const login = async (req, res) => {
         status: user.is_active ? 'Active' : 'Inactive',
         isActive: user.is_active,
         isEmailVerified: user.is_email_verified,
+        is_email_verified: user.is_email_verified,
+        emailVerifiedAt: user.email_verified_at_utc ? new Date(user.email_verified_at_utc).toISOString() : null,
+        email_verified_at: user.email_verified_at_utc ? new Date(user.email_verified_at_utc).toISOString() : null,
+        manualVerification: user.manual_verification,
+        manual_verification: user.manual_verification,
+        emailVerifiedBy: user.email_verified_by,
+        email_verified_by: user.email_verified_by,
+        lastVerificationEmailSent: user.last_verification_email_sent,
+        last_verification_email_sent: user.last_verification_email_sent,
+        // Two-Factor Authentication fields
+        mfaEnabled: user.mfa_enabled,
+        mfa_enabled: user.mfa_enabled,
+        mfaMethod: user.mfa_method || 'email',
+        mfa_method: user.mfa_method || 'email',
+        mfaEnabledAt: user.mfa_enabled_at_utc ? new Date(user.mfa_enabled_at_utc).toISOString() : null,
+        mfa_enabled_at: user.mfa_enabled_at_utc ? new Date(user.mfa_enabled_at_utc).toISOString() : null,
         createdBy: user.created_by,
         createdByName: user.created_by_name,
-        createdAt: user.created_at,
-        updatedAt: user.updated_at,
-        lastLogin: user.last_login,
-        last_login: user.last_login
+        createdAt: user.created_at_utc ? new Date(user.created_at_utc).toISOString() : null,
+        updatedAt: user.updated_at_utc ? new Date(user.updated_at_utc).toISOString() : null,
+        lastLogin: user.last_login_utc ? new Date(user.last_login_utc).toISOString() : null,
+        last_login: user.last_login_utc ? new Date(user.last_login_utc).toISOString() : null
       }
     });
 
@@ -328,8 +396,16 @@ const getCurrentUser = async (req, res) => {
     const [users] = await pool.query(
       `SELECT u.id, u.username, u.email, u.full_name, u.role, u.phone, u.department,
               u.office_location, u.gender, u.street, u.city, u.state, u.pincode,
-              u.is_active, u.is_email_verified, u.last_login, u.created_at, u.updated_at,
-              u.created_by, creator.full_name as created_by_name
+              u.is_active, u.is_email_verified, u.email_verified_at, u.manual_verification,
+              u.email_verified_by, u.last_verification_email_sent,
+              u.mfa_enabled, u.mfa_method, u.mfa_enabled_at,
+              u.last_login, u.created_at, u.updated_at,
+              u.created_by, creator.full_name as created_by_name,
+              CONVERT_TZ(u.last_login, @@session.time_zone, '+00:00') as last_login_utc,
+              CONVERT_TZ(u.created_at, @@session.time_zone, '+00:00') as created_at_utc,
+              CONVERT_TZ(u.updated_at, @@session.time_zone, '+00:00') as updated_at_utc,
+              CONVERT_TZ(u.email_verified_at, @@session.time_zone, '+00:00') as email_verified_at_utc,
+              CONVERT_TZ(u.mfa_enabled_at, @@session.time_zone, '+00:00') as mfa_enabled_at_utc
        FROM users u
        LEFT JOIN users creator ON u.created_by = creator.id
        WHERE u.id = ?`,
@@ -383,12 +459,28 @@ const getCurrentUser = async (req, res) => {
       status: user.is_active ? 'Active' : 'Inactive',
       isActive: user.is_active,
       isEmailVerified: user.is_email_verified,
+      is_email_verified: user.is_email_verified,
+      emailVerifiedAt: user.email_verified_at_utc ? new Date(user.email_verified_at_utc).toISOString() : null,
+      email_verified_at: user.email_verified_at_utc ? new Date(user.email_verified_at_utc).toISOString() : null,
+      manualVerification: user.manual_verification,
+      manual_verification: user.manual_verification,
+      emailVerifiedBy: user.email_verified_by,
+      email_verified_by: user.email_verified_by,
+      lastVerificationEmailSent: user.last_verification_email_sent,
+      last_verification_email_sent: user.last_verification_email_sent,
+      // Two-Factor Authentication fields
+      mfaEnabled: user.mfa_enabled,
+      mfa_enabled: user.mfa_enabled,
+      mfaMethod: user.mfa_method || 'email',
+      mfa_method: user.mfa_method || 'email',
+      mfaEnabledAt: user.mfa_enabled_at_utc ? new Date(user.mfa_enabled_at_utc).toISOString() : null,
+      mfa_enabled_at: user.mfa_enabled_at_utc ? new Date(user.mfa_enabled_at_utc).toISOString() : null,
       createdBy: user.created_by,
       createdByName: user.created_by_name,
-      createdAt: user.created_at,
-      updatedAt: user.updated_at,
-      lastLogin: user.last_login,
-      last_login: user.last_login,
+      createdAt: user.created_at_utc ? new Date(user.created_at_utc).toISOString() : null,
+      updatedAt: user.updated_at_utc ? new Date(user.updated_at_utc).toISOString() : null,
+      lastLogin: user.last_login_utc ? new Date(user.last_login_utc).toISOString() : null,
+      last_login: user.last_login_utc ? new Date(user.last_login_utc).toISOString() : null,
       regions: regions
     };
 
@@ -531,13 +623,7 @@ const verifyEmail = async (req, res) => {
   try {
     const { token } = req.params;
 
-    console.log('\n🔔 EMAIL VERIFICATION REQUEST RECEIVED');
-    console.log('   Token (first 50 chars):', token ? token.substring(0, 50) + '...' : 'NO TOKEN');
-    console.log('   Request URL:', req.originalUrl);
-    console.log('   Request Method:', req.method);
-
     if (!token) {
-      console.log('❌ No token provided');
       return res.status(400).json({
         success: false,
         error: 'Verification token is required'
@@ -580,13 +666,10 @@ const verifyEmail = async (req, res) => {
     }
 
     // Update user's email verification status
-    console.log(`📝 Updating database for user ID: ${decoded.id}`);
     await pool.query(
       'UPDATE users SET is_email_verified = true, email_verified_at = NOW(), updated_at = NOW() WHERE id = ?',
       [decoded.id]
     );
-
-    console.log(`✅ Email verified successfully for user ID: ${decoded.id}, email: ${decoded.email}`);
 
     res.json({
       success: true,
@@ -678,10 +761,6 @@ const manualVerifyUserEmail = async (req, res) => {
   try {
     const { userId } = req.params;
     const adminId = req.user.id; // ID of admin performing the action
-
-    console.log(`\n🔒 MANUAL EMAIL VERIFICATION REQUEST`);
-    console.log(`   Admin ID: ${adminId}`);
-    console.log(`   Target User ID: ${userId}`);
 
     // Get target user
     const [users] = await pool.query(
@@ -851,9 +930,9 @@ const validateSession = async (req, res) => {
 
     console.log(`🔍 [Validate Session] Checking for user: ${username} (ID: ${userId})`);
 
-    // Check if user has any active sessions
+    // Check if user has any active sessions (user_sessions table has: id, created_at, last_activity)
     const [sessions] = await pool.query(
-      'SELECT id, login_time, last_activity_time FROM user_sessions WHERE user_id = ? AND is_active = TRUE LIMIT 1',
+      'SELECT id, created_at, last_activity FROM user_sessions WHERE user_id = ? LIMIT 1',
       [userId]
     );
 

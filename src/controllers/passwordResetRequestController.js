@@ -49,24 +49,27 @@ const submitPasswordResetRequest = async (req, res) => {
     const userId = users[0].id;
     const userFullName = users[0].full_name;
 
-    // Create the request
+    // Create the request with a 24-hour expiry (increased from 1 hour for better UX)
+    const token = require('crypto').randomBytes(32).toString('hex');
+
+    console.log(`📅 Creating password reset request (using UTC timestamps)`);
+
     await pool.query(
-      `INSERT INTO password_reset_requests
-       (user_id, username_or_email, reason, status, ip_address, user_agent)
-       VALUES (?, ?, ?, 'pending', ?, ?)`,
-      [userId, username, reason, ipAddress, userAgent]
+      `INSERT INTO passwords_reset_requests
+       (user_id, token, created_at, expires_at)
+       VALUES (?, ?, UTC_TIMESTAMP(), DATE_ADD(UTC_TIMESTAMP(), INTERVAL 24 HOUR))`,
+      [userId, token]
     );
 
     // Notify all admins
     await notifyAllAdmins(
       'password_reset_request',
       '🔐 New Password Reset Request',
-      `${userFullName} has requested a password reset.`,
+      `${userFullName} (${username}) has requested a password reset.`,
       {
         data: {
           username,
           userId,
-          reason,
           ipAddress
         },
         priority: 'high',
@@ -103,35 +106,52 @@ const getAllPasswordResetRequests = async (req, res) => {
       SELECT
         prr.id,
         prr.user_id,
-        prr.username_or_email,
-        prr.reason,
-        prr.status,
-        prr.requested_at,
-        prr.reviewed_by,
-        prr.reviewed_at,
-        prr.review_note,
-        prr.ip_address,
+        prr.token,
+        prr.created_at as requested_at,
+        prr.expires_at,
+        prr.used_at,
+        CASE
+          WHEN prr.used_at IS NOT NULL THEN 'completed'
+          WHEN prr.used_at IS NULL AND prr.expires_at <= UTC_TIMESTAMP() THEN 'expired'
+          ELSE 'pending'
+        END as status,
         u.username,
         u.email,
-        u.full_name,
-        u.is_active,
-        reviewer.username as reviewer_username,
-        reviewer.full_name as reviewer_name
-      FROM password_reset_requests prr
+        u.full_name
+      FROM passwords_reset_requests prr
       LEFT JOIN users u ON prr.user_id = u.id
-      LEFT JOIN users reviewer ON prr.reviewed_by = reviewer.id
     `;
 
     const params = [];
 
-    if (status !== 'all') {
-      query += ' WHERE prr.status = ?';
-      params.push(status);
+    if (status === 'used' || status === 'completed') {
+      query += ' HAVING status = \'completed\'';
+    } else if (status === 'pending') {
+      query += ' HAVING status = \'pending\'';
+    } else if (status === 'expired' || status === 'rejected') {
+      query += ' HAVING status = \'expired\'';
     }
 
-    query += ' ORDER BY prr.requested_at DESC LIMIT 100';
+    query += ' ORDER BY prr.created_at DESC LIMIT 100';
 
     const [requests] = await pool.query(query, params);
+
+    // Log status distribution for debugging
+    const statusCounts = {
+      pending: requests.filter(r => r.status === 'pending').length,
+      completed: requests.filter(r => r.status === 'completed').length,
+      expired: requests.filter(r => r.status === 'expired').length
+    };
+    console.log(`📊 Password reset requests status distribution:`, statusCounts);
+    console.log(`   Filter requested: ${status}`);
+    console.log(`   Total returned: ${requests.length}`);
+
+    // Log first request details if any exist
+    if (requests.length > 0) {
+      const first = requests[0];
+      console.log(`   First request: ID=${first.id}, Status=${first.status}, Expires=${first.expires_at}`);
+      console.log(`   Current UTC time: ${new Date().toISOString()}`);
+    }
 
     res.json({
       success: true,
@@ -157,16 +177,17 @@ const getPasswordResetRequestById = async (req, res) => {
 
     const [requests] = await pool.query(
       `SELECT
-        prr.*,
+        prr.id,
+        prr.user_id,
+        prr.token,
+        prr.created_at,
+        prr.expires_at,
+        prr.used_at,
         u.username,
         u.email,
-        u.full_name,
-        u.is_active,
-        reviewer.username as reviewer_username,
-        reviewer.full_name as reviewer_name
-      FROM password_reset_requests prr
+        u.full_name
+      FROM passwords_reset_requests prr
       LEFT JOIN users u ON prr.user_id = u.id
-      LEFT JOIN users reviewer ON prr.reviewed_by = reviewer.id
       WHERE prr.id = ?`,
       [id]
     );
@@ -199,13 +220,12 @@ const getPasswordResetRequestById = async (req, res) => {
 const approvePasswordResetRequest = async (req, res) => {
   try {
     const { id } = req.params;
-    const { newPassword, note } = req.body;
+    const { newPassword } = req.body;
     const adminId = req.user.id;
 
     console.log('\n✅ APPROVING PASSWORD RESET REQUEST');
     console.log(`   Request ID: ${id}`);
     console.log(`   Admin ID: ${adminId}`);
-    console.log(`   Request body:`, req.body);
     console.log(`   New password provided: ${!!newPassword}`);
     console.log(`   New password length: ${newPassword ? newPassword.length : 0}`);
 
@@ -220,7 +240,7 @@ const approvePasswordResetRequest = async (req, res) => {
     // Get the request
     const [requests] = await pool.query(
       `SELECT prr.*, u.username, u.email, u.full_name
-       FROM password_reset_requests prr
+       FROM passwords_reset_requests prr
        LEFT JOIN users u ON prr.user_id = u.id
        WHERE prr.id = ?`,
       [id]
@@ -235,22 +255,31 @@ const approvePasswordResetRequest = async (req, res) => {
     }
 
     const request = requests[0];
-    console.log(`✅ Request found - Status: ${request.status}, User ID: ${request.user_id}`);
+    console.log(`✅ Request found - User ID: ${request.user_id}`);
 
-    if (request.status !== 'pending') {
-      console.log(`❌ Request already processed - Current status: ${request.status}`);
+    // Check if already used
+    if (request.used_at) {
+      console.log(`❌ Request already used at: ${request.used_at}`);
       return res.status(400).json({
         success: false,
-        error: 'This request has already been processed'
+        error: 'This request has already been used'
+      });
+    }
+
+    // Check if expired
+    if (new Date(request.expires_at) < new Date()) {
+      console.log(`❌ Request expired at: ${request.expires_at}`);
+      return res.status(400).json({
+        success: false,
+        error: 'This request has expired'
       });
     }
 
     if (!request.user_id) {
       console.log('❌ No user_id associated with this request');
-      console.log(`   Username/Email entered: ${request.username_or_email}`);
       return res.status(400).json({
         success: false,
-        error: `User not found. The username/email "${request.username_or_email}" does not exist in the system. Please create this user first before approving the password reset request.`
+        error: 'User not found for this reset request'
       });
     }
 
@@ -265,16 +294,12 @@ const approvePasswordResetRequest = async (req, res) => {
       [hashedPassword, request.user_id]
     );
 
-    // Update request status
+    // Mark request as used
     await pool.query(
-      `UPDATE password_reset_requests
-       SET status = 'completed',
-           reviewed_by = ?,
-           reviewed_at = NOW(),
-           review_note = ?,
-           new_password = ?
+      `UPDATE passwords_reset_requests
+       SET used_at = NOW()
        WHERE id = ?`,
-      [adminId, note, hashedPassword, id]
+      [id]
     );
 
     // Send email to user with new credentials
@@ -283,10 +308,10 @@ const approvePasswordResetRequest = async (req, res) => {
         await sendAdminPasswordResetEmail(
           {
             email: request.email,
-            username: request.username || request.username_or_email,
-            full_name: request.full_name || request.username_or_email
+            username: request.username,
+            full_name: request.full_name || request.username
           },
-          newPassword // Send plain password in email (user will change it on first login)
+          newPassword
         );
       } catch (emailError) {
         console.error('Failed to send password reset email:', emailError);
@@ -324,13 +349,12 @@ const approvePasswordResetRequest = async (req, res) => {
 
 /**
  * @route   POST /api/password-reset-requests/:id/reject
- * @desc    Reject password reset request (Admin only)
+ * @desc    Reject (delete) password reset request (Admin only)
  * @access  Private/Admin
  */
 const rejectPasswordResetRequest = async (req, res) => {
   try {
     const { id } = req.params;
-    const { note } = req.body;
     const adminId = req.user.id;
 
     console.log('\n❌ REJECTING PASSWORD RESET REQUEST');
@@ -339,7 +363,7 @@ const rejectPasswordResetRequest = async (req, res) => {
 
     // Get the request
     const [requests] = await pool.query(
-      'SELECT * FROM password_reset_requests WHERE id = ?',
+      'SELECT * FROM passwords_reset_requests WHERE id = ?',
       [id]
     );
 
@@ -352,38 +376,26 @@ const rejectPasswordResetRequest = async (req, res) => {
 
     const request = requests[0];
 
-    if (request.status !== 'pending') {
-      return res.status(400).json({
-        success: false,
-        error: 'This request has already been processed'
-      });
-    }
-
-    // Update request status
-    await pool.query(
-      `UPDATE password_reset_requests
-       SET status = 'rejected',
-           reviewed_by = ?,
-           reviewed_at = NOW(),
-           review_note = ?
-       WHERE id = ?`,
-      [adminId, note, id]
-    );
-
     // Notify the user if they exist
     if (request.user_id) {
       await createNotification(
         request.user_id,
         'password_reset_request',
         '❌ Password Reset Request Rejected',
-        note || 'Your password reset request has been rejected. Please contact support for assistance.',
+        'Your password reset request has been rejected. Please contact support for assistance.',
         {
           priority: 'high'
         }
       );
     }
 
-    console.log(`❌ Password reset request ${id} rejected`);
+    // Delete the request (rejection means deleting)
+    await pool.query(
+      'DELETE FROM passwords_reset_requests WHERE id = ?',
+      [id]
+    );
+
+    console.log(`❌ Password reset request ${id} rejected and deleted`);
 
     res.json({
       success: true,
@@ -407,7 +419,7 @@ const deletePasswordResetRequest = async (req, res) => {
   try {
     const { id } = req.params;
 
-    await pool.query('DELETE FROM password_reset_requests WHERE id = ?', [id]);
+    await pool.query('DELETE FROM passwords_reset_requests WHERE id = ?', [id]);
 
     res.json({
       success: true,

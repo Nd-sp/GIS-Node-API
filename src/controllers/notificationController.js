@@ -13,19 +13,14 @@ const getMyNotifications = async (req, res) => {
     let query = `
       SELECT
         id,
+        user_id,
         type,
         title,
         message,
-        data,
-        priority,
         is_read,
         read_at,
-        created_at,
-        expires_at,
-        action_url,
-        action_label
-      FROM notifications
-      WHERE user_id = ?
+        created_at
+      FROM notifications WHERE user_id = ?
     `;
 
     const params = [userId];
@@ -38,15 +33,9 @@ const getMyNotifications = async (req, res) => {
 
     const [notifications] = await pool.query(query, params);
 
-    // Parse JSON data field if it's a string
-    const formattedNotifications = notifications.map(notif => ({
-      ...notif,
-      data: notif.data ? (typeof notif.data === 'string' ? JSON.parse(notif.data) : notif.data) : null
-    }));
-
     res.json({
       success: true,
-      notifications: formattedNotifications
+      notifications
     });
   } catch (error) {
     console.error('Get notifications error:', error);
@@ -200,32 +189,22 @@ const clearAllRead = async (req, res) => {
  * @param {String} type - Notification type
  * @param {String} title - Notification title
  * @param {String} message - Notification message
- * @param {Object} options - Additional options (data, priority, action_url, action_label, expires_at)
+ * @param {Object} options - Additional options (data, action_url, action_label, expires_at)
  */
 const createNotification = async (userId, type, title, message, options = {}) => {
   try {
-    const {
-      data = null,
-      priority = 'medium',
-      action_url = null,
-      action_label = null,
-      expires_at = null
-    } = options;
+    // Note: options like data, priority, action_url, action_label, expires_at are accepted
+    // but not used because the current database schema only has user_id, type, title, message, is_read, created_at, read_at
 
     await pool.query(
       `INSERT INTO notifications
-       (user_id, type, title, message, data, priority, action_url, action_label, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (user_id, type, title, message)
+       VALUES (?, ?, ?, ?)`,
       [
         userId,
         type,
         title,
-        message,
-        data ? JSON.stringify(data) : null,
-        priority,
-        action_url,
-        action_label,
-        expires_at
+        message
       ]
     );
 

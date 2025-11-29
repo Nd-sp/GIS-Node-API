@@ -51,7 +51,7 @@ const authenticate = async (req, res, next) => {
 
       // Check if user has any active sessions (to detect force logout)
       const [sessions] = await pool.query(
-        'SELECT id FROM user_sessions WHERE user_id = ? AND is_active = TRUE LIMIT 1',
+        'SELECT id FROM user_sessions WHERE user_id = ? AND expires_at > NOW() LIMIT 1',
         [decoded.id]
       );
 
@@ -127,7 +127,7 @@ const checkRegionAccess = async (req, res, next) => {
 
     // Check if user has access to this region
     const [access] = await pool.query(
-      'SELECT * FROM user_regions WHERE user_id = ? AND region_id = ? AND (expires_at IS NULL OR expires_at > NOW())',
+      'SELECT * FROM user_regions WHERE user_id = ? AND region_id = ?',
       [userId, regionId]
     );
 

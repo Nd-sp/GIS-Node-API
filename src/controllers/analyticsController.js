@@ -10,28 +10,28 @@ const getDashboardAnalytics = async (req, res) => {
     const userId = req.user.id;
     const analytics = {};
 
-    // Count measurements
+    // Count measurements (uses created_by)
     const [measurements] = await pool.query(
-      'SELECT COUNT(*) as count FROM distance_measurements WHERE user_id = ?',
+      'SELECT COUNT(*) as count FROM distance_measurements WHERE created_by = ?',
       [userId]
     );
     analytics.total_measurements = measurements[0].count;
 
-    // Count polygons
+    // Count polygons (uses created_by)
     const [polygons] = await pool.query(
-      'SELECT COUNT(*) as count FROM polygon_drawings WHERE user_id = ?',
+      'SELECT COUNT(*) as count FROM polygon_drawings WHERE created_by = ?',
       [userId]
     );
     analytics.total_polygons = polygons[0].count;
 
-    // Count circles
+    // Count circles (uses created_by)
     const [circles] = await pool.query(
-      'SELECT COUNT(*) as count FROM circle_drawings WHERE user_id = ?',
+      'SELECT COUNT(*) as count FROM circle_drawings WHERE created_by = ?',
       [userId]
     );
     analytics.total_circles = circles[0].count;
 
-    // Count sectors
+    // Count sectors (uses user_id)
     const [sectors] = await pool.query(
       'SELECT COUNT(*) as count FROM sector_rf_data WHERE user_id = ?',
       [userId]
@@ -40,33 +40,33 @@ const getDashboardAnalytics = async (req, res) => {
 
     // Count infrastructure
     const [infrastructure] = await pool.query(
-      'SELECT COUNT(*) as count FROM infrastructure_items WHERE user_id = ?',
+      'SELECT COUNT(*) as count FROM infrastructure_items WHERE created_by = ?',
       [userId]
     );
     analytics.total_infrastructure = infrastructure[0].count;
 
     // Count bookmarks
     const [bookmarks] = await pool.query(
-      'SELECT COUNT(*) as count FROM bookmarks WHERE user_id = ?',
+      'SELECT COUNT(*) as count FROM bookmarks WHERE created_by = ?',
       [userId]
     );
     analytics.total_bookmarks = bookmarks[0].count;
 
     // Count layers
     const [layers] = await pool.query(
-      'SELECT COUNT(*) as count FROM layer_management WHERE user_id = ?',
+      'SELECT COUNT(*) as count FROM layer_management WHERE created_by = ?',
       [userId]
     );
     analytics.total_layers = layers[0].count;
 
-    // Recent activity (last 7 days)
+    // Recent activity (last 7 days) - All tables use created_by
     const [recent] = await pool.query(
       `SELECT COUNT(*) as count FROM (
-        SELECT created_at FROM distance_measurements WHERE user_id = ? AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+        SELECT created_at FROM distance_measurements WHERE created_by = ? AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
         UNION ALL
-        SELECT created_at FROM polygon_drawings WHERE user_id = ? AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+        SELECT created_at FROM polygon_drawings WHERE created_by = ? AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
         UNION ALL
-        SELECT created_at FROM infrastructure_items WHERE user_id = ? AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+        SELECT created_at FROM infrastructure_items WHERE created_by = ? AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
       ) as recent_activity`,
       [userId, userId, userId]
     );
@@ -132,7 +132,7 @@ const getRegionAnalytics = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // Get user's regions with item counts
+    // Get user's regions with item counts - All tables use created_by
     const [regions] = await pool.query(
       `SELECT
         r.id,
@@ -142,8 +142,8 @@ const getRegionAnalytics = async (req, res) => {
         COUNT(DISTINCT dm.id) as measurement_count
        FROM regions r
        INNER JOIN user_regions ur ON r.id = ur.region_id
-       LEFT JOIN infrastructure_items ii ON r.id = ii.region_id AND ii.user_id = ?
-       LEFT JOIN distance_measurements dm ON r.id = dm.region_id AND dm.user_id = ?
+       LEFT JOIN infrastructure_items ii ON r.id = ii.region_id AND ii.created_by = ?
+       LEFT JOIN distance_measurements dm ON r.id = dm.region_id AND dm.created_by = ?
        WHERE ur.user_id = ?
        GROUP BY r.id, r.name, r.type`,
       [userId, userId, userId]
@@ -171,7 +171,7 @@ const getFeatureAnalytics = async (req, res) => {
         feature_type,
         COUNT(*) as count
        FROM gis_features
-       WHERE user_id = ?
+       WHERE created_by = ?
        GROUP BY feature_type`,
       [userId]
     );
@@ -307,6 +307,17 @@ const getPerformanceMetrics = async (req, res) => {
       userId ? [userId] : []
     );
 
+    // Ensure overall metrics have default values and convert to numbers
+    const overall = overallMetrics[0] || {};
+    const overallSafe = {
+      total_requests: Number(overall.total_requests) || 0,
+      avg_latency: Number(overall.avg_latency) || 0,
+      min_latency: Number(overall.min_latency) || 0,
+      max_latency: Number(overall.max_latency) || 0,
+      successful_requests: Number(overall.successful_requests) || 0,
+      failed_requests: Number(overall.failed_requests) || 0
+    };
+
     res.json({
       success: true,
       data: {
@@ -314,7 +325,7 @@ const getPerformanceMetrics = async (req, res) => {
         latencyOverTime: latencyData,
         topEndpoints: endpointMetrics,
         statusCodeDistribution: statusCodes,
-        overall: overallMetrics[0]
+        overall: overallSafe
       }
     });
   } catch (error) {
@@ -348,14 +359,14 @@ const getUsageTrends = async (req, res) => {
         break;
     }
 
-    // Get activity trends for different feature types
+    // Get activity trends for different feature types - All tables use created_by
     const [trends] = await pool.query(
       `SELECT
         DATE_FORMAT(created_at, ?) as date,
         'distance' as type,
         COUNT(*) as count
        FROM distance_measurements
-       WHERE user_id = ? AND created_at >= DATE_SUB(NOW(), INTERVAL ${timeInterval})
+       WHERE created_by = ? AND created_at >= DATE_SUB(NOW(), INTERVAL ${timeInterval})
        GROUP BY date
 
        UNION ALL
@@ -365,7 +376,7 @@ const getUsageTrends = async (req, res) => {
         'polygon' as type,
         COUNT(*) as count
        FROM polygon_drawings
-       WHERE user_id = ? AND created_at >= DATE_SUB(NOW(), INTERVAL ${timeInterval})
+       WHERE created_by = ? AND created_at >= DATE_SUB(NOW(), INTERVAL ${timeInterval})
        GROUP BY date
 
        UNION ALL
@@ -375,7 +386,7 @@ const getUsageTrends = async (req, res) => {
         'elevation' as type,
         COUNT(*) as count
        FROM elevation_profiles
-       WHERE user_id = ? AND created_at >= DATE_SUB(NOW(), INTERVAL ${timeInterval})
+       WHERE created_by = ? AND created_at >= DATE_SUB(NOW(), INTERVAL ${timeInterval})
        GROUP BY date
 
        UNION ALL
@@ -385,7 +396,7 @@ const getUsageTrends = async (req, res) => {
         'circle' as type,
         COUNT(*) as count
        FROM circle_drawings
-       WHERE user_id = ? AND created_at >= DATE_SUB(NOW(), INTERVAL ${timeInterval})
+       WHERE created_by = ? AND created_at >= DATE_SUB(NOW(), INTERVAL ${timeInterval})
        GROUP BY date
 
        UNION ALL
@@ -405,7 +416,7 @@ const getUsageTrends = async (req, res) => {
         'infrastructure' as type,
         COUNT(*) as count
        FROM infrastructure_items
-       WHERE user_id = ? AND created_at >= DATE_SUB(NOW(), INTERVAL ${timeInterval})
+       WHERE created_by = ? AND created_at >= DATE_SUB(NOW(), INTERVAL ${timeInterval})
        GROUP BY date
 
        ORDER BY date ASC`,
@@ -551,33 +562,29 @@ const getRecentActivity = async (req, res) => {
       return userMap;
     };
 
-    // Get distance measurements
+    // Get distance measurements - Uses created_by, distance_meters (no region_id in table)
     const [measurements] = await pool.query(
       `SELECT
         dm.id,
-        dm.user_id,
+        dm.created_by,
         dm.created_at,
-        dm.total_distance,
-        r.name as region_name
+        dm.distance_meters
        FROM distance_measurements dm
-       LEFT JOIN regions r ON dm.region_id = r.id
-       WHERE ${isAdminOrManager ? '1=1' : 'dm.user_id = ?'}
+       WHERE ${isAdminOrManager ? '1=1' : 'dm.created_by = ?'}
        ORDER BY dm.created_at DESC
        LIMIT ?`,
       isAdminOrManager ? [parseInt(limit)] : [userId, parseInt(limit)]
     );
 
-    // Get polygon drawings
+    // Get polygon drawings (note: area and region_id columns don't exist in polygon_drawings table)
     const [polygons] = await pool.query(
       `SELECT
         pd.id,
-        pd.user_id,
+        pd.created_by,
         pd.created_at,
-        pd.area,
-        r.name as region_name
+        'N/A' as region_name
        FROM polygon_drawings pd
-       LEFT JOIN regions r ON pd.region_id = r.id
-       WHERE ${isAdminOrManager ? '1=1' : 'pd.user_id = ?'}
+       WHERE ${isAdminOrManager ? '1=1' : 'pd.created_by = ?'}
        ORDER BY pd.created_at DESC
        LIMIT ?`,
       isAdminOrManager ? [parseInt(limit)] : [userId, parseInt(limit)]
@@ -587,45 +594,41 @@ const getRecentActivity = async (req, res) => {
     const [infrastructure] = await pool.query(
       `SELECT
         ii.id,
-        ii.user_id,
+        ii.created_by,
         ii.created_at,
         ii.item_type,
         ii.item_name,
         r.name as region_name
        FROM infrastructure_items ii
        LEFT JOIN regions r ON ii.region_id = r.id
-       WHERE ${isAdminOrManager ? '1=1' : 'ii.user_id = ?'}
+       WHERE ${isAdminOrManager ? '1=1' : 'ii.created_by = ?'}
        ORDER BY ii.created_at DESC
        LIMIT ?`,
       isAdminOrManager ? [parseInt(limit)] : [userId, parseInt(limit)]
     );
 
-    // Get circle drawings
+    // Get circle drawings (note: circle_drawings uses created_by, not user_id; region_id and radius don't exist)
     const [circles] = await pool.query(
       `SELECT
         cd.id,
-        cd.user_id,
+        cd.created_by,
         cd.created_at,
-        cd.radius,
-        r.name as region_name
+        'N/A' as region_name
        FROM circle_drawings cd
-       LEFT JOIN regions r ON cd.region_id = r.id
-       WHERE ${isAdminOrManager ? '1=1' : 'cd.user_id = ?'}
+       WHERE ${isAdminOrManager ? '1=1' : 'cd.created_by = ?'}
        ORDER BY cd.created_at DESC
        LIMIT ?`,
       isAdminOrManager ? [parseInt(limit)] : [userId, parseInt(limit)]
     );
 
-    // Get sector RF data
+    // Get sector RF data (note: sector_name and region_id columns don't exist in sector_rf_data table)
     const [sectors] = await pool.query(
       `SELECT
         srf.id,
         srf.user_id,
         srf.created_at,
-        srf.sector_name,
-        r.name as region_name
+        'N/A' as region_name
        FROM sector_rf_data srf
-       LEFT JOIN regions r ON srf.region_id = r.id
        WHERE ${isAdminOrManager ? '1=1' : 'srf.user_id = ?'}
        ORDER BY srf.created_at DESC
        LIMIT ?`,
@@ -638,11 +641,11 @@ const getRecentActivity = async (req, res) => {
     measurements.forEach(m => {
       allActivities.push({
         id: `measurement-${m.id}`,
-        user_id: m.user_id,
+        user_id: m.created_by,
         timestamp: m.created_at,
         action: 'Completed Distance Measurement',
-        details: `${m.total_distance ? parseFloat(m.total_distance).toFixed(2) + ' km' : 'Distance calculated'}`,
-        region: m.region_name || 'Unknown',
+        details: `${m.distance_meters ? (parseFloat(m.distance_meters) / 1000).toFixed(2) + ' km' : 'Distance calculated'}`,
+        region: 'N/A', // distance_measurements table has no region_id
         type: 'measurement'
       });
     });
@@ -662,7 +665,7 @@ const getRecentActivity = async (req, res) => {
     infrastructure.forEach(i => {
       allActivities.push({
         id: `infrastructure-${i.id}`,
-        user_id: i.user_id,
+        user_id: i.created_by,
         timestamp: i.created_at,
         action: `Added ${i.item_type || 'Infrastructure'}`,
         details: i.item_name || 'Infrastructure item',
@@ -874,7 +877,7 @@ const getSystemOverview = async (req, res) => {
 
     // Get regions with coverage
     const [totalRegions] = await pool.query(
-      'SELECT COUNT(*) as total FROM regions WHERE is_active = true'
+      'SELECT COUNT(*) as total FROM regions'
     );
 
     const [regionsWithInfra] = await pool.query(
@@ -896,31 +899,13 @@ const getSystemOverview = async (req, res) => {
     const coveredRegions = parseInt(regionsWithInfra[0].covered);
     const coverage = totalRegionsCount > 0 ? ((coveredRegions / totalRegionsCount) * 100).toFixed(1) : 0;
 
-    // Utilization: based on infrastructure with UPS and proper power source
-    const [utilizationData] = await pool.query(
-      `SELECT
-        COUNT(*) as total,
-        SUM(CASE WHEN ups_availability = true THEN 1 ELSE 0 END) as with_ups,
-        SUM(CASE WHEN power_source IN ('Grid', 'Hybrid') THEN 1 ELSE 0 END) as proper_power
-       FROM infrastructure_items
-       WHERE status = "Active"`
-    );
+    // Utilization: based on capacity utilization (simplified calculation without ups_availability and power_source)
+    // Since those columns don't exist in schema, use active vs total ratio
+    const utilization = total > 0 ? ((active / total) * 100).toFixed(1) : 0;
 
-    const utilTotal = parseInt(utilizationData[0].total);
-    const withUps = parseInt(utilizationData[0].with_ups);
-    const properPower = parseInt(utilizationData[0].proper_power);
-
-    // Utilization: average of UPS coverage and proper power source
-    const upsPercentage = utilTotal > 0 ? (withUps / utilTotal) * 100 : 0;
-    const powerPercentage = utilTotal > 0 ? (properPower / utilTotal) * 100 : 0;
-    const utilization = ((upsPercentage + powerPercentage) / 2).toFixed(1);
-
-    // Get recent system alerts (maintenance due, inactive items)
-    const [maintenanceDue] = await pool.query(
-      `SELECT COUNT(*) as count
-       FROM infrastructure_items
-       WHERE maintenance_due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)`
-    );
+    // Get recent system alerts (maintenance due removed - column doesn't exist, inactive items)
+    // Note: maintenance_due_date column doesn't exist in infrastructure_items table
+    const maintenanceDue = [{ count: 0 }]; // Default to 0 since column doesn't exist
 
     res.json({
       success: true,
@@ -978,14 +963,8 @@ const getInfrastructureStats = async (req, res) => {
        GROUP BY structure_type`
     );
 
-    // Get total counts by power source
-    const [powerSourceCounts] = await pool.query(
-      `SELECT
-        power_source,
-        COUNT(*) as count
-       FROM infrastructure_items
-       GROUP BY power_source`
-    );
+    // Power source column doesn't exist in schema, skip this query
+    const powerSourceCounts = [];
 
     // Get total infrastructure count
     const [totalCount] = await pool.query(
@@ -1009,13 +988,8 @@ const getInfrastructureStats = async (req, res) => {
        FROM infrastructure_items`
     );
 
-    // Get UPS availability stats
-    const [upsStats] = await pool.query(
-      `SELECT
-        SUM(CASE WHEN ups_availability = TRUE THEN 1 ELSE 0 END) as with_ups,
-        SUM(CASE WHEN ups_availability = FALSE THEN 1 ELSE 0 END) as without_ups
-       FROM infrastructure_items`
-    );
+    // UPS availability column doesn't exist in schema, set default values
+    const upsStats = [{ with_ups: 0, without_ups: 0 }];
 
     // Get maintenance due items (within next 30 days)
     const [maintenanceDue] = await pool.query(

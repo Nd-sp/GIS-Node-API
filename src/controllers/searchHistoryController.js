@@ -13,7 +13,7 @@ exports.getSearchHistory = async (req, res) => {
 
     const [history] = await pool.query(
       `SELECT * FROM search_history
-       WHERE user_id = ?
+       WHERE created_by = ?
        ORDER BY searched_at DESC
        LIMIT ? OFFSET ?`,
       [userId, limit, offset]
@@ -21,7 +21,7 @@ exports.getSearchHistory = async (req, res) => {
 
     // Get total count
     const [countResult] = await pool.query(
-      'SELECT COUNT(*) as total FROM search_history WHERE user_id = ?',
+      'SELECT COUNT(*) as total FROM search_history WHERE created_by = ?',
       [userId]
     );
 
@@ -55,7 +55,7 @@ exports.getRecentSearches = async (req, res) => {
     const [searches] = await pool.query(
       `SELECT DISTINCT search_query, search_type, MAX(searched_at) as last_searched
        FROM search_history
-       WHERE user_id = ?
+       WHERE created_by = ?
        GROUP BY search_query, search_type
        ORDER BY last_searched DESC
        LIMIT ?`,
@@ -130,7 +130,7 @@ exports.clearSearchHistory = async (req, res) => {
     const userId = req.user.id;
 
     await pool.query(
-      'DELETE FROM search_history WHERE user_id = ?',
+      'DELETE FROM search_history WHERE created_by = ?',
       [userId]
     );
 
@@ -195,14 +195,14 @@ exports.getSearchStats = async (req, res) => {
     const [typeStats] = await pool.query(
       `SELECT search_type, COUNT(*) as count
        FROM search_history
-       WHERE user_id = ?
+       WHERE created_by = ?
        GROUP BY search_type`,
       [userId]
     );
 
     // Get total searches
     const [totalResult] = await pool.query(
-      'SELECT COUNT(*) as total FROM search_history WHERE user_id = ?',
+      'SELECT COUNT(*) as total FROM search_history WHERE created_by = ?',
       [userId]
     );
 
@@ -210,7 +210,7 @@ exports.getSearchStats = async (req, res) => {
     const [topQueries] = await pool.query(
       `SELECT search_query, search_type, COUNT(*) as frequency
        FROM search_history
-       WHERE user_id = ?
+       WHERE created_by = ?
        GROUP BY search_query, search_type
        ORDER BY frequency DESC
        LIMIT 5`,

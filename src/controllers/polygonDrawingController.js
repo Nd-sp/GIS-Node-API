@@ -119,7 +119,7 @@ const createPolygon = async (req, res) => {
 
     const [result] = await pool.query(
       `INSERT INTO polygon_drawings
-       (user_id, region_id, polygon_name, coordinates, area, perimeter,
+       (created_by, region_id, polygon_name, coordinates, area, perimeter,
         fill_color, stroke_color, opacity, properties, notes, is_saved)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [

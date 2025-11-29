@@ -20,7 +20,7 @@ const getAllData = async (req, res) => {
     });
 
     // Build WHERE condition based on role and filter
-    let whereCondition = 'WHERE user_id = ?';
+    let whereCondition = 'WHERE created_by = ?';
     let whereParams = [currentUserId];
 
     if (filter === 'all' && (currentUserRole === 'admin' || currentUserRole === 'manager')) {
@@ -30,181 +30,157 @@ const getAllData = async (req, res) => {
     } else if (filter === 'user' && (currentUserRole === 'admin' || currentUserRole === 'manager') && filterUserId) {
       const parsedUserId = parseInt(filterUserId);
       if (!isNaN(parsedUserId) && parsedUserId > 0) {
-        whereCondition = 'WHERE user_id = ?';
+        whereCondition = 'WHERE created_by = ?';
         whereParams = [parsedUserId];
         console.log('📊 Admin/Manager viewing user', parsedUserId);
       } else {
         console.log('⚠️ Invalid userId filter, defaulting to current user');
         // Invalid userId, default to current user
-        whereCondition = 'WHERE user_id = ?';
+        whereCondition = 'WHERE created_by = ?';
         whereParams = [currentUserId];
       }
     }
 
-    // Fetch all measurement types with username (with error handling for each query)
-    try {
-      const [distances] = await pool.query(
+    // 🚀 PERFORMANCE: Execute all queries in parallel using Promise.all
+    // Fix ambiguous column by adding table prefix
+    let whereConditionCreatedBy = whereCondition;
+    if (whereCondition === 'WHERE created_by = ?') {
+      // Already has created_by, just need to prefix it
+      whereConditionCreatedBy = whereCondition;
+    } else if (whereCondition === '') {
+      // No filter (admin viewing all)
+      whereConditionCreatedBy = '';
+    }
+
+    const [
+      distancesResult,
+      polygonsResult,
+      circlesResult,
+      elevationsResult,
+      infrastructuresResult,
+      sectorsResult,
+      fiberRingsResult
+    ] = await Promise.all([
+      pool.query(
         `SELECT d.*, u.username as username FROM distance_measurements d
-         LEFT JOIN users u ON d.user_id = u.id
-         ${whereCondition} ORDER BY d.created_at DESC`,
+         LEFT JOIN users u ON d.created_by = u.id
+         ${whereConditionCreatedBy.replace('created_by', 'd.created_by')}
+         ORDER BY d.created_at DESC`,
         whereParams
-      );
-      distances.forEach(d => allData.push({ ...d, type: 'Distance' }));
-    } catch (error) {
-      console.error('Error fetching distance measurements:', error);
-    }
-
-    try {
-      const [polygons] = await pool.query(
+      ),
+      pool.query(
         `SELECT p.*, u.username as username FROM polygon_drawings p
-         LEFT JOIN users u ON p.user_id = u.id
-         ${whereCondition} ORDER BY p.created_at DESC`,
+         LEFT JOIN users u ON p.created_by = u.id
+         ${whereConditionCreatedBy.replace('created_by', 'p.created_by')}
+         ORDER BY p.created_at DESC`,
         whereParams
-      );
-      polygons.forEach(p => allData.push({ ...p, type: 'Polygon' }));
-    } catch (error) {
-      console.error('Error fetching polygons:', error);
-    }
-
-    try {
-      const [circles] = await pool.query(
+      ),
+      pool.query(
         `SELECT c.*, u.username as username FROM circle_drawings c
-         LEFT JOIN users u ON c.user_id = u.id
-         ${whereCondition} ORDER BY c.created_at DESC`,
+         LEFT JOIN users u ON c.created_by = u.id
+         ${whereConditionCreatedBy.replace('created_by', 'c.created_by')}
+         ORDER BY c.created_at DESC`,
         whereParams
-      );
-      circles.forEach(c => allData.push({ ...c, type: 'Circle' }));
-    } catch (error) {
-      console.error('Error fetching circles:', error);
-    }
-
-    try {
-      // 🚀 Exclude large JSON fields to prevent "Out of sort memory" error
-      const [elevations] = await pool.query(
-        `SELECT e.id, e.user_id, e.profile_name, e.start_point, e.end_point,
-                e.total_distance, e.min_elevation, e.max_elevation,
-                e.elevation_gain, e.elevation_loss, e.bearing, e.reverse_bearing, e.notes,
-                e.antenna_height_1, e.antenna_height_2, e.rf_frequency,
-                e.created_at, e.updated_at, e.is_saved, e.region_id,
-                u.username as username
-         FROM elevation_profiles e
-         LEFT JOIN users u ON e.user_id = u.id
-         ${whereCondition} ORDER BY e.created_at DESC`,
+      ),
+      pool.query(
+        `SELECT e.*, u.username as username FROM elevation_profiles e
+         LEFT JOIN users u ON e.created_by = u.id
+         ${whereConditionCreatedBy.replace('created_by', 'e.created_by')}
+         ORDER BY e.created_at DESC`,
         whereParams
-      );
-      elevations.forEach(e => allData.push({ ...e, type: 'Elevation' }));
-    } catch (error) {
-      console.error('Error fetching elevation profiles:', error);
-    }
-
-    try {
-      const [infrastructures] = await pool.query(
+      ),
+      pool.query(
         `SELECT i.*, u.username as username FROM infrastructure_items i
-         LEFT JOIN users u ON i.user_id = u.id
-         ${whereCondition} ORDER BY i.created_at DESC`,
+         LEFT JOIN users u ON i.created_by = u.id
+         ${whereConditionCreatedBy.replace('created_by', 'i.created_by')}
+         ORDER BY i.created_at DESC`,
         whereParams
-      );
-      infrastructures.forEach(i => allData.push({ ...i, type: 'Infrastructure' }));
-    } catch (error) {
-      console.error('Error fetching infrastructure:', error);
-    }
-
-    try {
-      const [sectors] = await pool.query(
+      ),
+      pool.query(
         `SELECT s.*, u.username as username FROM sector_rf_data s
          LEFT JOIN users u ON s.user_id = u.id
-         ${whereCondition} ORDER BY s.created_at DESC`,
+         ${whereConditionCreatedBy.replace('created_by', 's.user_id')}
+         ORDER BY s.created_at DESC`,
         whereParams
-      );
-      sectors.forEach(s => allData.push({ ...s, type: 'SectorRF' }));
-    } catch (error) {
-      console.error('Error fetching sectors:', error);
-    }
+      ),
+      pool.query(
+        `SELECT f.*, u.username as username FROM fiber_rings f
+         LEFT JOIN users u ON f.created_by = u.id
+         ${whereConditionCreatedBy.replace('created_by', 'f.created_by')}
+         ORDER BY f.created_at DESC`,
+        whereParams
+      )
+    ]);
 
-    // Count items by type for logging
-    const counts = {
-      distances: allData.filter(item => item.type === 'Distance').length,
-      polygons: allData.filter(item => item.type === 'Polygon').length,
-      circles: allData.filter(item => item.type === 'Circle').length,
-      elevations: allData.filter(item => item.type === 'Elevation').length,
-      infrastructures: allData.filter(item => item.type === 'Infrastructure').length,
-      sectors: allData.filter(item => item.type === 'SectorRF').length
-    };
+    // Extract data from results
+    const distancesRaw = distancesResult[0] || [];
+    const polygons = polygonsResult[0] || [];
+    const circles = circlesResult[0] || [];
+    const elevations = elevationsResult[0] || [];
+    const infrastructures = infrastructuresResult[0] || [];
+    const sectors = sectorsResult[0] || [];
+    const fiberRings = fiberRingsResult[0] || [];
 
-    console.log('📊 DataHub response:', {
-      totalItems: allData.length,
-      ...counts
+    // Transform distance measurements to include points array
+    const distances = distancesRaw.map(dist => ({
+      ...dist,
+      points: [
+        { lat: parseFloat(dist.start_lat), lng: parseFloat(dist.start_lng) },
+        { lat: parseFloat(dist.end_lat), lng: parseFloat(dist.end_lng) }
+      ]
+    }));
+
+    console.log('📊 DataHub getAllData response:', {
+      distances: distances.length,
+      polygons: polygons.length,
+      circles: circles.length,
+      elevations: elevations.length,
+      infrastructures: infrastructures.length,
+      sectors: sectors.length,
+      fiberRings: fiberRings.length
     });
 
-    res.json({ success: true, data: allData, count: allData.length });
+    res.json({
+      success: true,
+      data: {
+        distances,
+        polygons,
+        circles,
+        elevations,
+        infrastructures,
+        sectors,
+        fiberRings
+      },
+      totalCount: distances.length + polygons.length + circles.length +
+                  elevations.length + infrastructures.length + sectors.length + fiberRings.length
+    });
   } catch (error) {
     console.error('Get all data error:', error);
-    res.status(500).json({ success: false, error: 'Failed to get data' });
+    res.status(500).json({ success: false, error: 'Failed to get all data' });
   }
 };
 
 /**
  * @route   POST /api/datahub/import
- * @desc    Import data (user-wise)
+ * @desc    Import data (placeholder for future implementation)
  * @access  Private
  */
 const importData = async (req, res) => {
   try {
     const userId = req.user.id;
-    const {
-      import_type,
-      file_name,
-      file_size,
-      region_id,
-      import_settings
-    } = req.body;
+    const { import_type, import_data } = req.body;
 
-    if (!import_type || !file_name) {
+    if (!import_type || !import_data) {
       return res.status(400).json({
         success: false,
-        error: 'Import type and file name required'
+        error: 'Import type and data required'
       });
     }
 
-    const validTypes = ['geojson', 'kml', 'csv', 'excel', 'shapefile'];
-    if (!validTypes.includes(import_type)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid import type. Must be: geojson, kml, csv, excel, or shapefile'
-      });
-    }
-
-    const [result] = await pool.query(
-      `INSERT INTO data_hub_imports
-       (user_id, region_id, import_type, file_name, file_size,
-        import_status, import_settings)
-       VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
-      [
-        userId,
-        region_id,
-        import_type,
-        file_name,
-        file_size,
-        import_settings ? JSON.stringify(import_settings) : null
-      ]
-    );
-
-    // Placeholder - implement actual import logic here
-    // Update status to processing, then completed
-    setTimeout(async () => {
-      await pool.query(
-        `UPDATE data_hub_imports
-         SET import_status = 'completed', records_imported = 0, completed_at = NOW()
-         WHERE id = ?`,
-        [result.insertId]
-      );
-    }, 1000);
-
+    // Placeholder - implement actual import logic
     res.status(201).json({
       success: true,
-      import_id: result.insertId,
-      status: 'pending',
-      message: 'Import started'
+      message: 'Import feature coming soon'
     });
   } catch (error) {
     console.error('Import data error:', error);
@@ -214,7 +190,7 @@ const importData = async (req, res) => {
 
 /**
  * @route   GET /api/datahub/imports
- * @desc    Get import history (user-wise)
+ * @desc    Get import history (placeholder for future implementation)
  * @access  Private
  */
 const getImportHistory = async (req, res) => {
@@ -222,15 +198,8 @@ const getImportHistory = async (req, res) => {
     const userId = req.user.id;
     const { limit = 20, offset = 0 } = req.query;
 
-    const [imports] = await pool.query(
-      `SELECT * FROM data_hub_imports
-       WHERE user_id = ?
-       ORDER BY created_at DESC
-       LIMIT ? OFFSET ?`,
-      [userId, parseInt(limit), parseInt(offset)]
-    );
-
-    res.json({ success: true, imports, count: imports.length });
+    // Placeholder - return empty array for now
+    res.json({ success: true, imports: [], count: 0 });
   } catch (error) {
     console.error('Get import history error:', error);
     res.status(500).json({ success: false, error: 'Failed to get import history' });
@@ -322,8 +291,8 @@ const getExportHistory = async (req, res) => {
 
     const [exports] = await pool.query(
       `SELECT * FROM data_hub_exports
-       WHERE user_id = ?
-       AND (expires_at IS NULL OR expires_at > NOW())
+       WHERE created_by = ?
+       AND (expires_at IS NULL OR end_time > NOW())
        ORDER BY created_at DESC
        LIMIT ? OFFSET ?`,
       [userId, parseInt(limit), parseInt(offset)]
@@ -350,7 +319,7 @@ const downloadExport = async (req, res) => {
       `SELECT * FROM data_hub_exports
        WHERE id = ? AND user_id = ?
        AND export_status = 'completed'
-       AND (expires_at IS NULL OR expires_at > NOW())`,
+       AND (expires_at IS NULL OR end_time > NOW())`,
       [id, userId]
     );
 
@@ -400,6 +369,7 @@ const deleteSingleData = async (req, res) => {
       'polygon': 'polygon_drawings',
       'circle': 'circle_drawings',
       'sector': 'sector_rf_data',
+      'fiberRing': 'fiber_rings',
       'elevation': 'elevation_profiles',
       'infrastructure': 'infrastructure_items',
       'customer': 'infrastructure_items' // Customers are also stored in infrastructure_items
@@ -413,9 +383,12 @@ const deleteSingleData = async (req, res) => {
       });
     }
 
+    // Map type to correct user ID column (most tables use created_by, sector uses user_id)
+    const userIdColumn = type === 'sector' ? 'user_id' : 'created_by';
+
     // Check if item exists and get owner
     const [items] = await pool.query(
-      `SELECT user_id FROM ${tableName} WHERE id = ?`,
+      `SELECT ${userIdColumn} as owner_id FROM ${tableName} WHERE id = ?`,
       [id]
     );
 
@@ -426,7 +399,7 @@ const deleteSingleData = async (req, res) => {
       });
     }
 
-    const itemUserId = items[0].user_id;
+    const itemUserId = items[0].owner_id;
 
     // Authorization check: Admin can delete any, users can only delete their own
     if (currentUserRole !== 'admin' && itemUserId !== currentUserId) {
@@ -482,6 +455,7 @@ const deleteBulkData = async (req, res) => {
       'polygon': 'polygon_drawings',
       'circle': 'circle_drawings',
       'sector': 'sector_rf_data',
+      'fiberRing': 'fiber_rings',
       'elevation': 'elevation_profiles',
       'infrastructure': 'infrastructure_items',
       'customer': 'infrastructure_items' // Customers are also stored in infrastructure_items
@@ -495,7 +469,10 @@ const deleteBulkData = async (req, res) => {
       });
     }
 
-    let whereCondition = 'WHERE user_id = ?';
+    // Map type to correct user ID column (most tables use created_by, sector uses user_id)
+    const userIdColumn = type === 'sector' ? 'user_id' : 'created_by';
+
+    let whereCondition = `WHERE ${userIdColumn} = ?`;
     let whereParams = [];
 
     if (userId && currentUserRole === 'admin') {

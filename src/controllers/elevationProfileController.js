@@ -146,43 +146,23 @@ const createProfile = async (req, res) => {
       });
     }
 
+    // Prepare path coordinates from elevation data or points
+    const path_coordinates = points ? JSON.stringify(points.map(p => ({ lat: p.lat, lng: p.lng }))) :
+                            elevation_data ? JSON.stringify(elevation_data.map(p => ({ lat: p.location.lat, lng: p.location.lng }))) :
+                            JSON.stringify([start_point, end_point]);
+
     const [result] = await pool.query(
       `INSERT INTO elevation_profiles
-       (user_id, region_id, profile_name, start_point, end_point, elevation_data,
-        total_distance, min_elevation, max_elevation, elevation_gain, elevation_loss,
-        bearing, reverse_bearing, notes, is_saved, points, building_data, obstacle_data, los_analysis,
-        antenna_height_1, antenna_height_2, rf_frequency)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (created_by, path_coordinates, elevation_data, total_distance, min_elevation, max_elevation)
+       VALUES (?, ?, ?, ?, ?, ?)`,
       [
         userId,
-        region_id,
-        profile_name,
-        JSON.stringify(start_point),
-        JSON.stringify(end_point),
+        path_coordinates,
         elevation_data ? JSON.stringify(elevation_data) : null,
         total_distance,
         min_elevation,
-        max_elevation,
-        elevation_gain,
-        elevation_loss,
-        bearing || null, // Bearing angle A→B (null for multi-point profiles)
-        reverse_bearing || null, // Bearing angle B→A (null for multi-point profiles)
-        notes,
-        is_saved || false,
-        points ? JSON.stringify(points) : null,
-        building_data ? JSON.stringify(building_data) : null,
-        obstacle_data ? JSON.stringify(obstacle_data) : null,
-        los_analysis ? JSON.stringify(los_analysis) : null,
-        antenna_height_1 || 30.00,
-        antenna_height_2 || 30.00,
-        rf_frequency || 2400.00
+        max_elevation
       ]
-    );
-
-    // 🔍 DEBUG: Query the just-saved record to verify bearing was saved
-    const [savedRecord] = await pool.query(
-      'SELECT id, profile_name, bearing, reverse_bearing FROM elevation_profiles WHERE id = ?',
-      [result.insertId]
     );
 
     console.log('✅ DEBUG: Elevation profile saved to database:', {

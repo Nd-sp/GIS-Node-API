@@ -105,7 +105,7 @@ const getUserActivity = async (req, res) => {
     const [logs] = await pool.query(
       `SELECT action_type, resource_type, resource_id, created_at
        FROM audit_logs
-       WHERE user_id = ? AND created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+       WHERE created_by = ? AND created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
        ORDER BY created_at DESC
        LIMIT ?`,
       [targetUserId, parseInt(days), parseInt(limit)]
@@ -154,16 +154,15 @@ const createAuditLog = async (req, res) => {
     }
 
     const [result] = await pool.query(
-      `INSERT INTO audit_logs (user_id, action, resource_type, resource_id, details, ip_address, user_agent)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO audit_logs (user_id, action, resource_type, resource_id, details, ip_address)
+       VALUES (?, ?, ?, ?, ?, ?)`,
       [
         userId,
         action,
         resource_type || null,
         finalResourceId,
         Object.keys(finalDetails).length > 0 ? JSON.stringify(finalDetails) : null,
-        ip_address || req.ip,
-        user_agent || req.get('User-Agent')
+        ip_address || req.ip
       ]
     );
 
@@ -248,17 +247,17 @@ const clearAllAuditLogs = async (req, res) => {
  */
 const logAudit = async (userId, action, resourceType, resourceId, details, req) => {
   try {
+    // audit_logs table has: user_id, action, resource_type, resource_id, details, ip_address, created_at
     await pool.query(
-      `INSERT INTO audit_logs (user_id, action, resource_type, resource_id, details, ip_address, user_agent)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO audit_logs (user_id, action, resource_type, resource_id, details, ip_address)
+       VALUES (?, ?, ?, ?, ?, ?)`,
       [
         userId,
         action,
         resourceType || null,
         resourceId || null,
         details ? JSON.stringify(details) : null,
-        req?.ip || null,
-        req?.get('User-Agent') || null
+        req?.ip || null
       ]
     );
   } catch (error) {

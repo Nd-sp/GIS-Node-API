@@ -122,7 +122,7 @@ const createCircle = async (req, res) => {
 
     const [result] = await pool.query(
       `INSERT INTO circle_drawings
-       (user_id, region_id, circle_name, center_lat, center_lng, radius,
+       (created_by, region_id, circle_name, center_lat, center_lng, radius_meters,
         fill_color, stroke_color, opacity, properties, notes, is_saved)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
@@ -240,7 +240,7 @@ const deleteCircle = async (req, res) => {
 
     // Get circle details before deletion for audit log
     const [circles] = await pool.query(
-      'SELECT circle_name, radius FROM circle_drawings WHERE id = ? AND user_id = ?',
+      'SELECT circle_name, radius_meters FROM circle_drawings WHERE id = ? AND user_id = ?',
       [id, userId]
     );
 
@@ -250,7 +250,7 @@ const deleteCircle = async (req, res) => {
     if (circles.length > 0) {
       await logAudit(userId, 'DELETE', 'circle_drawing', id, {
         circle_name: circles[0].circle_name,
-        radius: circles[0].radius
+        radius_meters: circles[0].radius_meters
       }, req);
     }
 
