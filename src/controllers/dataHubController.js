@@ -156,7 +156,20 @@ const getAllData = async (req, res) => {
     });
   } catch (error) {
     console.error('Get all data error:', error);
-    res.status(500).json({ success: false, error: 'Failed to get all data' });
+    
+    // DEBUG: Write error to file for production debugging
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const logPath = path.join(__dirname, '../../error_log.txt');
+      const timestamp = new Date().toISOString();
+      const logMessage = `\n[${timestamp}] DataHub Error:\n${error.stack || error.message}\n`;
+      fs.appendFileSync(logPath, logMessage);
+    } catch (fsError) {
+      console.error('Failed to write to error log:', fsError);
+    }
+
+    res.status(500).json({ success: false, error: 'Failed to get data' });
   }
 };
 

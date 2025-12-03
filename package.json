@@ -4,8 +4,12 @@
   "description": "Backend API server for PersonalGIS Platform with MySQL database",
   "main": "server.js",
   "scripts": {
-    "start": "set NODE_ENV=production && node server.js",
-    "dev": "set NODE_ENV=development && nodemon server.js",
+    "dev": "cross-env NODE_ENV=development nodemon server.js",
+    "start": "cross-env NODE_ENV=production node server.js",
+    "start:win": "cross-env NODE_ENV=production node server.js",
+    "dev:win": "cross-env NODE_ENV=development nodemon server.js",
+    "switch:dev": "node scripts/switch-env.js development",
+    "switch:prod": "node scripts/switch-env.js production",
     "test": "node test-apis.js",
     "test-apis": "node test-apis.js",
     "verify-schema": "node verify-schema.js",
@@ -43,6 +47,7 @@
     "xml2js": "^0.6.2"
   },
   "devDependencies": {
+    "cross-env": "^10.1.0",
     "nodemon": "^3.0.2"
   }
 }

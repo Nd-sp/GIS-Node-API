@@ -6,7 +6,11 @@ const morgan = require("morgan");
 const rateLimit = require("express-rate-limit");
 
 // Load environment-specific configuration FIRST
-const { env, isProduction, isDevelopment } = require("./src/config/environment");
+const {
+  env,
+  isProduction,
+  isDevelopment,
+} = require("./src/config/environment");
 
 const { testConnection } = require("./src/config/database");
 const { errorHandler, notFound } = require("./src/middleware/errorHandler");
@@ -26,9 +30,10 @@ app.use(helmet());
 // CORS configuration - Support multiple origins
 const allowedOrigins = [
   "http://localhost:3005",
-  "http://172.16.20.6:81",
   "http://localhost:3000",
-  process.env.FRONTEND_URL
+  "http://172.16.20.6:81", // Frontend
+  "http://172.16.20.6:82", // Self/Backend (for some internal calls)
+  process.env.FRONTEND_URL,
 ].filter(Boolean);
 
 app.use(
@@ -40,13 +45,22 @@ app.use(
       if (allowedOrigins.indexOf(origin) !== -1) {
         callback(null, true);
       } else {
-        callback(new Error('Not allowed by CORS'));
+        console.log(`CORS blocked origin: ${origin}`); // Log blocked origins for debugging
+        // For strict production, use the error below.
+        // For testing internal IPs which might vary slightly, you could temporarily allow all:
+        // callback(null, true);
+        callback(new Error(`Not allowed by CORS: ${origin}`));
       }
     },
     credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Request-ID", "X-Request-Time"],
-    exposedHeaders: ["X-Request-ID", "X-Request-Time"]
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Request-ID",
+      "X-Request-Time",
+    ],
+    exposedHeaders: ["X-Request-ID", "X-Request-Time"],
   })
 );
 
@@ -60,7 +74,9 @@ if (process.env.NODE_ENV === "development") {
 }
 
 // Performance tracking middleware
-const { performanceMiddleware } = require("./src/middleware/performanceTracking");
+const {
+  performanceMiddleware,
+} = require("./src/middleware/performanceTracking");
 app.use(performanceMiddleware);
 
 // 🚀 COMPRESSION MIDDLEWARE - Reduces response size by 70-80%
@@ -80,26 +96,26 @@ const limiter = rateLimit({
   skip: (req) => {
     // Skip rate limiting for critical endpoints to prevent blocking during initial page load
     const skipPaths = [
-      '/auth',
-      '/temporary-access',
-      '/users',
-      '/datahub',
-      '/measurements',
-      '/drawings',
-      '/rf',
-      '/fiber-rings',
-      '/elevation',
-      '/infrastructure',
-      '/analytics',
-      '/notifications',
-      '/regions',
-      '/search',
-      '/user-map-preferences', // Map preferences for each user
-      '/boundaries' // Region boundaries for map layers
+      "/auth",
+      "/temporary-access",
+      "/users",
+      "/datahub",
+      "/measurements",
+      "/drawings",
+      "/rf",
+      "/fiber-rings",
+      "/elevation",
+      "/infrastructure",
+      "/analytics",
+      "/notifications",
+      "/regions",
+      "/search",
+      "/user-map-preferences", // Map preferences for each user
+      "/boundaries", // Region boundaries for map layers
     ];
     // Check if request path starts with any skip path (without /api/ prefix)
-    return skipPaths.some(path => req.path.startsWith(path));
-  }
+    return skipPaths.some((path) => req.path.startsWith(path));
+  },
 });
 app.use("/api/", limiter);
 
@@ -110,7 +126,7 @@ app.get("/", (req, res) => {
     message: "🚀 OptiConnectGIS Backend API is running!",
     version: "1.0.0",
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV
+    environment: process.env.NODE_ENV,
   });
 });
 
@@ -122,7 +138,7 @@ app.get("/api/health", async (req, res) => {
     // Test database connection
     let dbStatus = "connected";
     try {
-      await pool.query('SELECT 1');
+      await pool.query("SELECT 1");
     } catch (err) {
       dbStatus = "disconnected";
     }
@@ -135,18 +151,18 @@ app.get("/api/health", async (req, res) => {
         version: "1.0.0",
         environment: process.env.NODE_ENV || "development",
         uptime: process.uptime(),
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       },
       database: {
         status: dbStatus,
-        name: process.env.DB_NAME || "opticonnectgis_db"
-      }
+        name: process.env.DB_NAME || "opticonnectgis_db",
+      },
     });
   } catch (error) {
     res.status(503).json({
       success: false,
       status: "unhealthy",
-      error: error.message
+      error: error.message,
     });
   }
 });
@@ -156,7 +172,7 @@ app.get("/api/cache/stats", (req, res) => {
   const stats = getCacheStats();
   res.json({
     success: true,
-    cache: stats
+    cache: stats,
   });
 });
 
@@ -165,7 +181,7 @@ app.post("/api/cache/clear", (req, res) => {
   clearAllCache();
   res.json({
     success: true,
-    message: "All cache cleared successfully"
+    message: "All cache cleared successfully",
   });
 });
 
@@ -173,43 +189,151 @@ app.post("/api/cache/clear", (req, res) => {
 const routes = [
   // Public routes (no auth) - Load these first
   { name: "auth", path: "./src/routes/auth.routes", mount: "/api/auth" },
-  { name: "passwordResetRequests", path: "./src/routes/passwordResetRequest.routes", mount: "/api/password-reset-requests" },
+  {
+    name: "passwordResetRequests",
+    path: "./src/routes/passwordResetRequest.routes",
+    mount: "/api/password-reset-requests",
+  },
 
   // Authenticated routes
   { name: "mfa", path: "./src/routes/mfaRoutes", mount: "/api/mfa" },
   { name: "users", path: "./src/routes/user.routes", mount: "/api/users" },
-  { name: "regions", path: "./src/routes/region.routes", mount: "/api/regions" },
-  { name: "boundaryVersions", path: "./src/routes/boundaryVersionRoutes", mount: "/api/regions" },
-  { name: "boundaryPublic", path: "./src/routes/boundaryPublicRoutes", mount: "/api/boundaries" },
+  {
+    name: "regions",
+    path: "./src/routes/region.routes",
+    mount: "/api/regions",
+  },
+  {
+    name: "boundaryVersions",
+    path: "./src/routes/boundaryVersionRoutes",
+    mount: "/api/regions",
+  },
+  {
+    name: "boundaryPublic",
+    path: "./src/routes/boundaryPublicRoutes",
+    mount: "/api/boundaries",
+  },
   { name: "groups", path: "./src/routes/group.routes", mount: "/api/groups" },
-  { name: "features", path: "./src/routes/feature.routes", mount: "/api/features" },
-  { name: "distance", path: "./src/routes/distanceMeasurement.routes", mount: "/api/measurements/distance" },
-  { name: "polygon", path: "./src/routes/polygonDrawing.routes", mount: "/api/drawings/polygon" },
-  { name: "circle", path: "./src/routes/circleDrawing.routes", mount: "/api/drawings/circle" },
-  { name: "sectorRF", path: "./src/routes/sectorRF.routes", mount: "/api/rf/sectors" },
-  { name: "elevation", path: "./src/routes/elevationProfile.routes", mount: "/api/elevation" },
-  { name: "buildingCache", path: "./src/routes/buildingCache.routes", mount: "/api/building-cache" },
-  { name: "infrastructure", path: "./src/routes/infrastructure.routes", mount: "/api/infrastructure" },
-  { name: "layers", path: "./src/routes/layerManagement.routes", mount: "/api/layers" },
-  { name: "bookmarks", path: "./src/routes/bookmark.routes", mount: "/api/bookmarks" },
+  {
+    name: "features",
+    path: "./src/routes/feature.routes",
+    mount: "/api/features",
+  },
+  {
+    name: "distance",
+    path: "./src/routes/distanceMeasurement.routes",
+    mount: "/api/measurements/distance",
+  },
+  {
+    name: "polygon",
+    path: "./src/routes/polygonDrawing.routes",
+    mount: "/api/drawings/polygon",
+  },
+  {
+    name: "circle",
+    path: "./src/routes/circleDrawing.routes",
+    mount: "/api/drawings/circle",
+  },
+  {
+    name: "sectorRF",
+    path: "./src/routes/sectorRF.routes",
+    mount: "/api/rf/sectors",
+  },
+  {
+    name: "elevation",
+    path: "./src/routes/elevationProfile.routes",
+    mount: "/api/elevation",
+  },
+  {
+    name: "buildingCache",
+    path: "./src/routes/buildingCache.routes",
+    mount: "/api/building-cache",
+  },
+  {
+    name: "infrastructure",
+    path: "./src/routes/infrastructure.routes",
+    mount: "/api/infrastructure",
+  },
+  {
+    name: "layers",
+    path: "./src/routes/layerManagement.routes",
+    mount: "/api/layers",
+  },
+  {
+    name: "bookmarks",
+    path: "./src/routes/bookmark.routes",
+    mount: "/api/bookmarks",
+  },
   { name: "search", path: "./src/routes/search.routes", mount: "/api/search" },
-  { name: "analytics", path: "./src/routes/analytics.routes", mount: "/api/analytics" },
+  {
+    name: "analytics",
+    path: "./src/routes/analytics.routes",
+    mount: "/api/analytics",
+  },
   { name: "audit", path: "./src/routes/audit.routes", mount: "/api/audit" },
-  { name: "preferences", path: "./src/routes/preferences.routes", mount: "/api/preferences" },
-  { name: "datahub", path: "./src/routes/dataHub.routes", mount: "/api/datahub" },
-  { name: "temporaryAccess", path: "./src/routes/temporaryAccess.routes", mount: "/api/temporary-access" },
-  { name: "regionRequests", path: "./src/routes/regionRequest.routes", mount: "/api/region-requests" },
-  { name: "permissions", path: "./src/routes/permission.routes", mount: "/api/permissions" },
-  { name: "reports", path: "./src/routes/reports.routes", mount: "/api/reports" },
-  { name: "userMapPreferences", path: "./src/routes/userMapPreferences.routes", mount: "/api/user-map-preferences" },
-  { name: "searchHistory", path: "./src/routes/searchHistory.routes", mount: "/api/search-history" },
-  { name: "notifications", path: "./src/routes/notification.routes", mount: "/api/notifications" },
-  { name: "devTools", path: "./src/routes/devToolsRoutes", mount: "/api/dev-tools" },
+  {
+    name: "preferences",
+    path: "./src/routes/preferences.routes",
+    mount: "/api/preferences",
+  },
+  {
+    name: "datahub",
+    path: "./src/routes/dataHub.routes",
+    mount: "/api/datahub",
+  },
+  {
+    name: "temporaryAccess",
+    path: "./src/routes/temporaryAccess.routes",
+    mount: "/api/temporary-access",
+  },
+  {
+    name: "regionRequests",
+    path: "./src/routes/regionRequest.routes",
+    mount: "/api/region-requests",
+  },
+  {
+    name: "permissions",
+    path: "./src/routes/permission.routes",
+    mount: "/api/permissions",
+  },
+  {
+    name: "reports",
+    path: "./src/routes/reports.routes",
+    mount: "/api/reports",
+  },
+  {
+    name: "userMapPreferences",
+    path: "./src/routes/userMapPreferences.routes",
+    mount: "/api/user-map-preferences",
+  },
+  {
+    name: "searchHistory",
+    path: "./src/routes/searchHistory.routes",
+    mount: "/api/search-history",
+  },
+  {
+    name: "notifications",
+    path: "./src/routes/notification.routes",
+    mount: "/api/notifications",
+  },
+  {
+    name: "devTools",
+    path: "./src/routes/devToolsRoutes",
+    mount: "/api/dev-tools",
+  },
 
   // Routes mounted at /api - Load these LAST to avoid intercepting specific routes
-  { name: "groupPermissions", path: "./src/routes/groupPermission.routes", mount: "/api" },
-  { name: "userPermissions", path: "./src/routes/userPermission.routes", mount: "/api" },
-  { name: "fiberRings", path: "./src/routes/fiberRingRoutes", mount: "/api" }
+  {
+    name: "groupPermissions",
+    path: "./src/routes/groupPermission.routes",
+    mount: "/api",
+  },
+  {
+    name: "userPermissions",
+    path: "./src/routes/userPermission.routes",
+    mount: "/api",
+  },
+  { name: "fiberRings", path: "./src/routes/fiberRingRoutes", mount: "/api" },
 ];
 
 let loadedCount = 0;
@@ -221,7 +345,10 @@ routes.forEach(({ name, path, mount }) => {
     app.use(mount, routeModule);
     loadedCount++;
   } catch (error) {
-    console.error(`❌ Failed to load ${name} routes (${mount}):`, error.message);
+    console.error(
+      `❌ Failed to load ${name} routes (${mount}):`,
+      error.message
+    );
     failedRoutes.push({ name, mount, error: error.message });
   }
 });
@@ -229,7 +356,9 @@ routes.forEach(({ name, path, mount }) => {
 if (failedRoutes.length === 0) {
   console.log(`✅ All ${loadedCount} routes loaded successfully`);
 } else {
-  console.warn(`⚠️ ${loadedCount}/${routes.length} routes loaded. ${failedRoutes.length} failed:`);
+  console.warn(
+    `⚠️ ${loadedCount}/${routes.length} routes loaded. ${failedRoutes.length} failed:`
+  );
   failedRoutes.forEach(({ name, mount, error }) => {
     console.warn(`   - ${name} (${mount}): ${error}`);
   });
@@ -267,7 +396,7 @@ const startServer = async () => {
     websocketServer.initialize(server);
 
     // Get local IP address for network access
-    const os = require('os');
+    const os = require("os");
     const networkInterfaces = os.networkInterfaces();
     let localIP = null;
 
@@ -275,7 +404,7 @@ const startServer = async () => {
       const interfaces = networkInterfaces[interfaceName];
       for (const iface of interfaces) {
         // Skip internal (loopback) and non-IPv4 addresses
-        if (iface.family === 'IPv4' && !iface.internal) {
+        if (iface.family === "IPv4" && !iface.internal) {
           localIP = iface.address;
           break;
         }
@@ -284,7 +413,7 @@ const startServer = async () => {
     }
 
     // Start HTTP server (Express + WebSocket)
-    const HOST = process.env.HOST || '0.0.0.0';
+    const HOST = process.env.HOST || "0.0.0.0";
     server.listen(PORT, HOST, () => {
       console.log("\n" + "=".repeat(60));
       console.log("🚀 OptiConnect GIS Backend Server Started Successfully!");
@@ -292,7 +421,9 @@ const startServer = async () => {
       console.log(`📡 HTTP Server: http://localhost:${PORT}`);
       console.log(`🔌 WebSocket Server: ws://localhost:${PORT}/ws`);
       console.log(`🌍 Environment: ${env}`);
-      console.log(`📊 Database: ${process.env.DB_NAME} @ ${process.env.DB_HOST}`);
+      console.log(
+        `📊 Database: ${process.env.DB_NAME} @ ${process.env.DB_HOST}`
+      );
       console.log(`🔒 CORS Enabled: ${process.env.FRONTEND_URL}`);
       console.log("=".repeat(60));
       console.log("  Access URLs:");
@@ -303,8 +434,12 @@ const startServer = async () => {
         console.log("");
         console.log("  📱 TO ACCESS FROM ANOTHER LAPTOP:");
         console.log(`     1. Connect laptop to same Wi-Fi/network`);
-        console.log(`     2. Open browser and go to: http://${localIP}:${PORT}`);
-        console.log(`     3. Frontend should use: http://${localIP}:${PORT}/api`);
+        console.log(
+          `     2. Open browser and go to: http://${localIP}:${PORT}`
+        );
+        console.log(
+          `     3. Frontend should use: http://${localIP}:${PORT}/api`
+        );
         console.log(`     4. WebSocket should use: ws://${localIP}:${PORT}/ws`);
       }
       console.log("=".repeat(60));
